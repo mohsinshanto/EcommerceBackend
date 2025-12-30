@@ -1,0 +1,17 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/obj/
+
+# Dependency directories
+/vendor/
+
+# IDE files
+*.idea/
+*.vscode/
