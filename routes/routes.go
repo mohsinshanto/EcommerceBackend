@@ -35,6 +35,7 @@ func SetupRoutes(r *gin.Engine) {
 		api.Use(middlewares.AuthMiddleware(), middlewares.AdminOnly())
 		{
 			api.POST("/products", controllers.CreateProduct)
+			api.DELETE("/products/:id", controllers.DeleteProduct)
 			api.GET("/admin/orders", controllers.GetAllOrders)
 		}
 	}

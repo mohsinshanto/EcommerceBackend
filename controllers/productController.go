@@ -42,3 +42,15 @@ func CreateProduct(c *gin.Context) {
 	config.DB.Create(&product)
 	c.JSON(http.StatusOK, product)
 }
+func DeleteProduct(c *gin.Context) {
+	id := c.Param("id") // get product id from URL
+
+	var product models.Product
+	if err := config.DB.First(&product, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		return
+	}
+
+	config.DB.Delete(&product)
+	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
+}

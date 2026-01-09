@@ -4,6 +4,7 @@ import (
 	"ecommerce-backend/config"
 	"ecommerce-backend/models"
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -116,8 +117,19 @@ func GetMyOrders(c *gin.Context) {
 
 	c.JSON(200, orders)
 }
+
+// Admin-only: Get all orders
 func GetAllOrders(c *gin.Context) {
 	var orders []models.Order
-	config.DB.Find(&orders)
-	c.JSON(200, orders)
+
+	if err := config.DB.Find(&orders).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch orders",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": orders,
+	})
 }

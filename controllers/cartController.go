@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"ecommerce-backend/config"
+	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
 	"net/http"
 
@@ -11,86 +12,53 @@ import (
 func AddToCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
-	type AddToCartDTO struct {
-		ProductID uint `json:"product_id" binding:"required"`
-		Quantity  int  `json:"quantity" binding:"gte=1"`
-	}
-
-	var body AddToCartDTO
-
+	var body dto.AddToCartRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Check existing cart item
-	var existing models.Cart
+	var cart models.Cart
 	err := config.DB.
 		Where("user_id = ? AND product_id = ?", userID, body.ProductID).
-		First(&existing).Error
+		First(&cart).Error
 
-	// --- RESPONSE DTO ---
-	type CartItemResponse struct {
-		Quantity int `json:"quantity"`
-		Product  struct {
-			Name  string  `json:"name"`
-			Price float64 `json:"price"`
-		} `json:"product"`
-	}
-
-	// If already exists → update
+	// If exists → update
 	if err == nil {
-		existing.Quantity += body.Quantity
-		if err := config.DB.Save(&existing).Error; err != nil {
+		cart.Quantity += body.Quantity
+		if err := config.DB.Save(&cart).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update cart"})
 			return
 		}
-
-		// Preload product for response
-		config.DB.Preload("Product").First(&existing)
-
-		resp := CartItemResponse{
-			Quantity: existing.Quantity,
-			Product: struct {
-				Name  string  `json:"name"`
-				Price float64 `json:"price"`
-			}{
-				Name:  existing.Product.Name,
-				Price: existing.Product.Price,
-			},
+	} else {
+		// Create new
+		cart = models.Cart{
+			UserID:    userID,
+			ProductID: body.ProductID,
+			Quantity:  body.Quantity,
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Cart updated", "cart": resp})
-		return
+		if err := config.DB.Create(&cart).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add to cart"})
+			return
+		}
 	}
 
-	// Create new cart item
-	newCart := models.Cart{
-		UserID:    userID,
-		ProductID: body.ProductID,
-		Quantity:  body.Quantity,
-	}
+	// Load product
+	config.DB.Preload("Product").First(&cart)
 
-	if err := config.DB.Create(&newCart).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add to cart"})
-		return
-	}
-
-	// Preload product
-	config.DB.Preload("Product").First(&newCart)
-
-	resp := CartItemResponse{
-		Quantity: newCart.Quantity,
-		Product: struct {
-			Name  string  `json:"name"`
-			Price float64 `json:"price"`
-		}{
-			Name:  newCart.Product.Name,
-			Price: newCart.Product.Price,
+	resp := dto.CartItemResponse{
+		Quantity: cart.Quantity,
+		Product: dto.CartProductResponse{
+			Name:  cart.Product.Name,
+			Price: cart.Product.Price,
 		},
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Added to cart", "cart": resp})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Cart updated",
+		"cart":    resp,
+	})
 }
 
 func GetCart(c *gin.Context) {

@@ -91,6 +91,7 @@ func Login(c *gin.Context) {
 	})
 
 	tokenString, err := token.SignedString(config.JwtSecret)
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
