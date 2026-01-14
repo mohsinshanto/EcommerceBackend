@@ -15,7 +15,7 @@ func CreateOrder(c *gin.Context) {
 	// Start DB transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(500, gin.H{"error": "Failed to start transaction"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
 		return
 	}
 
@@ -23,13 +23,13 @@ func CreateOrder(c *gin.Context) {
 	var cart []models.Cart
 	if err := tx.Preload("Product").Where("user_id = ?", userID).Find(&cart).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Failed to load cart"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load cart"})
 		return
 	}
 	fmt.Println(cart)
 	if len(cart) == 0 {
 		tx.Rollback()
-		c.JSON(400, gin.H{"error": "Cart empty"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cart empty"})
 		return
 	}
 
@@ -37,7 +37,7 @@ func CreateOrder(c *gin.Context) {
 	order := models.Order{UserID: userID}
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Failed to create order"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
 		return
 	}
 
@@ -50,7 +50,7 @@ func CreateOrder(c *gin.Context) {
 		// Stock validation
 		if product.Stock < item.Quantity {
 			tx.Rollback()
-			c.JSON(400, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("Not enough stock for product %s", product.Name),
 			})
 			return
@@ -66,7 +66,7 @@ func CreateOrder(c *gin.Context) {
 
 		if err := tx.Create(&oi).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Failed to create order item"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order item"})
 			return
 		}
 
@@ -74,7 +74,7 @@ func CreateOrder(c *gin.Context) {
 		newStock := product.Stock - item.Quantity
 		if err := tx.Model(&product).Update("stock", newStock).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Failed to update product stock"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product stock"})
 			return
 		}
 
@@ -84,25 +84,25 @@ func CreateOrder(c *gin.Context) {
 	// 4. Update order total
 	if err := tx.Model(&order).Update("total_price", total).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Failed to update order total"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order total"})
 		return
 	}
 
 	// 5. Clear cart
 	if err := tx.Where("user_id = ?", userID).Delete(&models.Cart{}).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Failed to clear cart"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear cart"})
 		return
 	}
 
 	// 6. Commit transaction
 	if err := tx.Commit().Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Transaction failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Transaction failed"})
 		return
 	}
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusCreated, gin.H{
 		"message":   "Order placed successfully",
 		"order_id":  order.ID,
 		"totalPaid": total,
