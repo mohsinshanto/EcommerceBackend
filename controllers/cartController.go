@@ -17,7 +17,6 @@ func AddToCart(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
 	var cart models.Cart
 	err := config.DB.
 		Where("user_id = ? AND product_id = ?", userID, body.ProductID).
