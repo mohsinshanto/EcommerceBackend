@@ -3,6 +3,7 @@ package controllers
 import (
 	"ecommerce-backend/config"
 	"ecommerce-backend/models"
+	"ecommerce-backend/dto"
 	"fmt"
 	"net/http"
 
@@ -26,7 +27,6 @@ func CreateOrder(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load cart"})
 		return
 	}
-	fmt.Println(cart)
 	if len(cart) == 0 {
 		tx.Rollback()
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cart empty"})
@@ -108,15 +108,26 @@ func CreateOrder(c *gin.Context) {
 		"totalPaid": total,
 	})
 }
-
 func GetMyOrders(c *gin.Context) {
-	userID := c.GetUint("user_id")
+	fmt.Println("GetMyOrders route hit")
+    userID := c.GetUint("user_id")
 
-	var orders []models.Order
-	config.DB.Where("user_id = ?", userID).Find(&orders)
+    var orders []models.Order
+    if err := config.DB.Where("user_id = ?", userID).Find(&orders).Error; err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
+        return
+    }
 
-	c.JSON(200, orders)
+    var response []dto.OrderResponse
+    for _, order := range orders {
+        response = append(response, dto.ToOrderResponse(order))
+    }
+    fmt.Println(response)
+    // SEND THE DTO, not the original orders
+    c.JSON(http.StatusOK, response)
 }
+
+
 
 // Admin-only: Get all orders
 func GetAllOrders(c *gin.Context) {

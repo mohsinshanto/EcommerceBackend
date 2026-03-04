@@ -8,57 +8,63 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
 func AddToCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 
 	var body dto.AddToCartRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	var product models.Product
+	if err := config.DB.First(&product, body.ProductID).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Product not found"})
+		return
+	}
+
+	if product.Stock < body.Quantity {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient stock"})
+		return
+	}
+
 	var cart models.Cart
 	err := config.DB.
 		Where("user_id = ? AND product_id = ?", userID, body.ProductID).
 		First(&cart).Error
 
-	// If exists → update
 	if err == nil {
 		cart.Quantity += body.Quantity
-		if err := config.DB.Save(&cart).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update cart"})
-			return
-		}
+		config.DB.Save(&cart)
 	} else {
-		// Create new
 		cart = models.Cart{
 			UserID:    userID,
 			ProductID: body.ProductID,
 			Quantity:  body.Quantity,
 		}
-
-		if err := config.DB.Create(&cart).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add to cart"})
-			return
-		}
+		config.DB.Create(&cart)
 	}
 
-	// Load product
 	config.DB.Preload("Product").First(&cart)
-
-	resp := dto.CartItemResponse{
-		Quantity: cart.Quantity,
-		Product: dto.CartProductResponse{
-			Name:  cart.Product.Name,
-			Price: cart.Product.Price,
-		},
-	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Cart updated",
-		"cart":    resp,
+		"cart": gin.H{
+			"id":       cart.ID,
+			"quantity": cart.Quantity,
+			"product": gin.H{
+				"name":  cart.Product.Name,
+				"price": cart.Product.Price,
+			},
+		},
 	})
 }
+
 
 func GetCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
@@ -72,7 +78,7 @@ func GetCart(c *gin.Context) {
 	}
 
 	// --- Build clean response ---
-	var response []gin.H
+	response := make([]gin.H, 0) // ✅ IMPORTANT
 
 	for _, item := range cartItems {
 		response = append(response, gin.H{
@@ -87,9 +93,10 @@ func GetCart(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"cart": response,
+		"cart": response, // always []
 	})
 }
+
 
 func RemoveFromCart(c *gin.Context) {
 	userID := c.GetUint("user_id")

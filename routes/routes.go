@@ -14,7 +14,7 @@ func SetupRoutes(r *gin.Engine) {
 		// Public
 		api.POST("/register", controllers.Register)
 		api.POST("/login", controllers.Login)
-
+       
 		// User authenticated
 		api.Use(middlewares.AuthMiddleware())
 		{
@@ -29,6 +29,7 @@ func SetupRoutes(r *gin.Engine) {
 			// Orders
 			api.POST("/order", controllers.CreateOrder)
 			api.GET("/orders", controllers.GetMyOrders)
+			
 		}
 
 		// Admin-only
