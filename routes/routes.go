@@ -20,6 +20,7 @@ func SetupRoutes(r *gin.Engine) {
 		{
 			// Products (user can view)
 			api.GET("/products", controllers.GetProducts)
+			api.GET("/products/:id", controllers.GetProductByID)
 
 			// Cart
 			api.POST("/cart", controllers.AddToCart)
