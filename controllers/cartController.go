@@ -5,7 +5,7 @@ import (
 	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
 	"net/http"
-
+	"strconv"
 	"github.com/gin-gonic/gin"
 )
 func AddToCart(c *gin.Context) {
@@ -58,8 +58,10 @@ func AddToCart(c *gin.Context) {
 			"id":       cart.ID,
 			"quantity": cart.Quantity,
 			"product": gin.H{
-				"name":  cart.Product.Name,
-				"price": cart.Product.Price,
+				"id":    cart.Product.ID,
+	            "name":  cart.Product.Name,
+	            "price": cart.Product.Price,
+	            "image_url": cart.Product.ImageURL,
 			},
 		},
 	})
@@ -70,38 +72,90 @@ func GetCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
 	var cartItems []models.Cart
+
 	if err := config.DB.Preload("Product").
 		Where("user_id = ?", userID).
 		Find(&cartItems).Error; err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// --- Build clean response ---
-	response := make([]gin.H, 0) // ✅ IMPORTANT
+	var response []dto.CartItemResponse
 
 	for _, item := range cartItems {
-		response = append(response, gin.H{
-			"id":       item.ID,
-			"quantity": item.Quantity,
-			"product": gin.H{
-				"id":    item.ProductID,
-				"name":  item.Product.Name,
-				"price": item.Product.Price,
+		response = append(response, dto.CartItemResponse{
+			ID:       item.ID,
+			Quantity: item.Quantity,
+			Product: dto.CartProductResponse{
+				ID:       item.Product.ID,
+				Name:     item.Product.Name,
+				Price:    item.Product.Price,
+				ImageURL: item.Product.ImageURL, // ✅ important
 			},
 		})
 	}
 
-	c.JSON(200, gin.H{
-		"cart": response, // always []
+	c.JSON(http.StatusOK, gin.H{
+		"cart": response,
 	})
 }
+func UpdateCartQuantity(c *gin.Context) {
+	userID := c.GetUint("user_id")
 
+	cartIDParam := c.Param("id")
+	cartID, err := strconv.Atoi(cartIDParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cart ID"})
+		return
+	}
 
+	var body struct {
+		Quantity int `json:"quantity" binding:"required,gte=1"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var cart models.Cart
+	if err := config.DB.
+		Where("id = ? AND user_id = ?", cartID, userID).
+		First(&cart).Error; err != nil {
+
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cart item not found"})
+		return
+	}
+
+	// ✅ Check stock
+	var product models.Product
+	if err := config.DB.First(&product, cart.ProductID).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Product not found"})
+		return
+	}
+
+	if product.Stock < body.Quantity {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient stock"})
+		return
+	}
+
+	// ✅ Update quantity
+	cart.Quantity = body.Quantity
+	config.DB.Save(&cart)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Quantity updated",
+	})
+}
 func RemoveFromCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
-	cartID := c.Param("id")
-
+	cartIDParam := c.Param("id")
+    cartID, err := strconv.Atoi(cartIDParam)
+    if err != nil {
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cart ID"})
+	return
+   }
 	var cart models.Cart
 
 	// Check if the item exists and belongs to the user

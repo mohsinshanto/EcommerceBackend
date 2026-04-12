@@ -6,11 +6,14 @@ type AddToCartRequest struct {
 }
 
 type CartProductResponse struct {
-	Name  string  `json:"name"`
-	Price float64 `json:"price"`
+	ID       uint    `json:"id"`
+	Name     string  `json:"name"`
+	Price    float64 `json:"price"`
+	ImageURL string  `json:"image_url"` // ✅ add this
 }
 
 type CartItemResponse struct {
-	Quantity int                 `json:"quantity"`
+	ID       uint                 `json:"id"` // ✅ cart item id
+	Quantity int                  `json:"quantity"`
 	Product  CartProductResponse `json:"product"`
 }
