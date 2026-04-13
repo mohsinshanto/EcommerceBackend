@@ -2,8 +2,10 @@ package middlewares
 
 import (
 	"ecommerce-backend/config"
+	"ecommerce-backend/utils"
 	"net/http"
 	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -12,7 +14,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
+			utils.RespondError(c, http.StatusUnauthorized, "Authorization header required")
 			c.Abort()
 			return
 		}
@@ -27,7 +29,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		})
 
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			utils.RespondError(c, http.StatusUnauthorized, "Invalid or expired token")
 			c.Abort()
 			return
 		}

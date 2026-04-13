@@ -2,10 +2,11 @@ package controllers
 
 import (
 	"ecommerce-backend/config"
-	"ecommerce-backend/models"
 	"ecommerce-backend/dto"
-	"fmt"
+	"ecommerce-backend/models"
+	"ecommerce-backend/utils"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,7 +17,7 @@ func CreateOrder(c *gin.Context) {
 	// Start DB transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to start transaction")
 		return
 	}
 
@@ -24,12 +25,12 @@ func CreateOrder(c *gin.Context) {
 	var cart []models.Cart
 	if err := tx.Preload("Product").Where("user_id = ?", userID).Find(&cart).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load cart"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to load cart")
 		return
 	}
 	if len(cart) == 0 {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cart empty"})
+		utils.RespondError(c, http.StatusBadRequest, "Cart is empty")
 		return
 	}
 
@@ -37,7 +38,7 @@ func CreateOrder(c *gin.Context) {
 	order := models.Order{UserID: userID}
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to create order")
 		return
 	}
 
@@ -50,9 +51,7 @@ func CreateOrder(c *gin.Context) {
 		// Stock validation
 		if product.Stock < item.Quantity {
 			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("Not enough stock for product %s", product.Name),
-			})
+			utils.RespondError(c, http.StatusBadRequest, "Not enough stock for "+product.Name)
 			return
 		}
 
@@ -66,7 +65,7 @@ func CreateOrder(c *gin.Context) {
 
 		if err := tx.Create(&oi).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create order item"})
+			utils.RespondError(c, http.StatusInternalServerError, "Failed to create order item")
 			return
 		}
 
@@ -74,7 +73,7 @@ func CreateOrder(c *gin.Context) {
 		newStock := product.Stock - item.Quantity
 		if err := tx.Model(&product).Update("stock", newStock).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product stock"})
+			utils.RespondError(c, http.StatusInternalServerError, "Failed to update product stock")
 			return
 		}
 
@@ -84,63 +83,89 @@ func CreateOrder(c *gin.Context) {
 	// 4. Update order total
 	if err := tx.Model(&order).Update("total_price", total).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order total"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to update order total")
 		return
 	}
 
 	// 5. Clear cart
 	if err := tx.Where("user_id = ?", userID).Delete(&models.Cart{}).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear cart"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to clear cart")
 		return
 	}
 
 	// 6. Commit transaction
 	if err := tx.Commit().Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Transaction failed"})
+		utils.RespondError(c, http.StatusInternalServerError, "Transaction failed")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":   "Order placed successfully",
+	utils.RespondSuccess(c, http.StatusCreated, "Order placed successfully", gin.H{
 		"order_id":  order.ID,
 		"totalPaid": total,
 	})
 }
+
 func GetMyOrders(c *gin.Context) {
-	fmt.Println("GetMyOrders route hit")
-    userID := c.GetUint("user_id")
+	userID := c.GetUint("user_id")
 
-    var orders []models.Order
-    if err := config.DB.Where("user_id = ?", userID).Find(&orders).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch orders"})
-        return
-    }
+	var orders []models.Order
+	if err := config.DB.Where("user_id = ? AND archived = ?", userID, false).Order("created_at DESC").Find(&orders).Error; err != nil {
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch orders")
+		return
+	}
 
-    var response []dto.OrderResponse
-    for _, order := range orders {
-        response = append(response, dto.ToOrderResponse(order))
-    }
-    fmt.Println(response)
-    // SEND THE DTO, not the original orders
-    c.JSON(http.StatusOK, response)
+	var response []dto.OrderResponse
+	for _, order := range orders {
+		response = append(response, dto.ToOrderResponse(order))
+	}
+
+	utils.RespondSuccess(c, http.StatusOK, "Orders loaded", gin.H{
+		"orders": response,
+	})
 }
 
+func ArchiveOrder(c *gin.Context) {
+	userID := c.GetUint("user_id")
 
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		utils.RespondError(c, http.StatusBadRequest, "Invalid order ID")
+		return
+	}
+
+	var order models.Order
+	if err := config.DB.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+		utils.RespondError(c, http.StatusNotFound, "Order not found")
+		return
+	}
+
+	if order.Archived {
+		utils.RespondSuccess(c, http.StatusOK, "Order already archived", nil)
+		return
+	}
+
+	if err := config.DB.Model(&order).Update("archived", true).Error; err != nil {
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to archive order")
+		return
+	}
+
+	utils.RespondSuccess(c, http.StatusOK, "Order archived", gin.H{
+		"id": order.ID,
+	})
+}
 
 // Admin-only: Get all orders
 func GetAllOrders(c *gin.Context) {
 	var orders []models.Order
 
 	if err := config.DB.Find(&orders).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch orders",
-		})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch orders")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": orders,
+	utils.RespondSuccess(c, http.StatusOK, "Orders loaded", gin.H{
+		"orders": orders,
 	})
 }

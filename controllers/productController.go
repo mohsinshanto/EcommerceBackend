@@ -2,14 +2,15 @@ package controllers
 
 import (
 	"ecommerce-backend/config"
-	"ecommerce-backend/models"
 	"ecommerce-backend/dto"
-	"net/http"
-	"strconv" 
+	"ecommerce-backend/models"
+	"ecommerce-backend/utils"
 	"math"
+	"net/http"
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 )
-
 
 func GetProducts(c *gin.Context) {
 	var products []models.Product
@@ -54,7 +55,7 @@ func GetProducts(c *gin.Context) {
 	if minPrice != "" {
 		min, err := strconv.ParseFloat(minPrice, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid min_price"})
+			utils.RespondError(c, http.StatusBadRequest, "Invalid min_price")
 			return
 		}
 		query = query.Where("price >= ?", min)
@@ -63,7 +64,7 @@ func GetProducts(c *gin.Context) {
 	if maxPrice != "" {
 		max, err := strconv.ParseFloat(maxPrice, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid max_price"})
+			utils.RespondError(c, http.StatusBadRequest, "Invalid max_price")
 			return
 		}
 		query = query.Where("price <= ?", max)
@@ -71,7 +72,7 @@ func GetProducts(c *gin.Context) {
 
 	// --- Count total (before pagination) ---
 	if err := query.Count(&total).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count products"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to count products")
 		return
 	}
 
@@ -87,7 +88,7 @@ func GetProducts(c *gin.Context) {
 
 	// --- Pagination & Execution ---
 	if err := query.Limit(limit).Offset(offset).Find(&products).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch products")
 		return
 	}
 
@@ -106,40 +107,37 @@ func GetProducts(c *gin.Context) {
 	}
 
 	// --- Final JSON response ---
-	c.JSON(http.StatusOK, gin.H{
-		"products":   response,
-		"total":      total,
-		"page":       page,
-		"limit":      limit,
-		"last_page":  int(math.Ceil(float64(total) / float64(limit))),
+	utils.RespondSuccess(c, http.StatusOK, "Products loaded", gin.H{
+		"products":  response,
+		"total":     total,
+		"page":      page,
+		"limit":     limit,
+		"last_page": int(math.Ceil(float64(total) / float64(limit))),
 	})
 }
 
 func CreateProduct(c *gin.Context) {
 	var req dto.CreateProductRequest
 
-	// Bind incoming JSON to DTO
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.RespondBindError(c, err)
 		return
 	}
-	// Map DTO → Model
+
 	product := models.Product{
 		Name:        req.Name,
 		Description: req.Description,
 		Price:       req.Price,
 		Stock:       req.Stock,
 		ImageURL:    req.ImageURL,
-		Category:    req.Category, 
+		Category:    req.Category,
 	}
 
-	// Save to database
 	if err := config.DB.Create(&product).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create product"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to create product")
 		return
 	}
 
-	// Map Model → Response DTO
 	response := dto.ProductResponse{
 		ID:          product.ID,
 		Name:        product.Name,
@@ -150,47 +148,46 @@ func CreateProduct(c *gin.Context) {
 		Category:    product.Category,
 	}
 
-	c.JSON(http.StatusCreated, response)
+	utils.RespondSuccess(c, http.StatusCreated, "Product created successfully", response)
 }
+
 func DeleteProduct(c *gin.Context) {
 	idParam := c.Param("id")
 
-	// Convert ID to uint
 	id, err := strconv.Atoi(idParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID"})
+		utils.RespondError(c, http.StatusBadRequest, "Invalid product ID")
 		return
 	}
 
 	var product models.Product
 
-	// Explicit primary key query
 	if err := config.DB.First(&product, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		utils.RespondError(c, http.StatusNotFound, "Product not found")
 		return
 	}
 
-	// Delete and check error
 	if err := config.DB.Delete(&product).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete product"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to delete product")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Product deleted successfully"})
+	utils.RespondSuccess(c, http.StatusOK, "Product deleted successfully", nil)
 }
+
 func GetProductByID(c *gin.Context) {
 	idParam := c.Param("id")
 
 	id, err := strconv.Atoi(idParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID"})
+		utils.RespondError(c, http.StatusBadRequest, "Invalid product ID")
 		return
 	}
 
 	var product models.Product
 
 	if err := config.DB.First(&product, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		utils.RespondError(c, http.StatusNotFound, "Product not found")
 		return
 	}
 
@@ -204,5 +201,5 @@ func GetProductByID(c *gin.Context) {
 		Category:    product.Category,
 	}
 
-	c.JSON(http.StatusOK, response)
+	utils.RespondSuccess(c, http.StatusOK, "Product loaded", response)
 }

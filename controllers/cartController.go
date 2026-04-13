@@ -4,32 +4,38 @@ import (
 	"ecommerce-backend/config"
 	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
+	"ecommerce-backend/utils"
 	"net/http"
 	"strconv"
+
+	"errors"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
 func AddToCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
-	
+
 	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.RespondError(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var body dto.AddToCartRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.RespondBindError(c, err)
 		return
 	}
 
 	var product models.Product
 	if err := config.DB.First(&product, body.ProductID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Product not found"})
+		utils.RespondError(c, http.StatusNotFound, "Product not found")
 		return
 	}
 
 	if product.Stock < body.Quantity {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient stock"})
+		utils.RespondError(c, http.StatusBadRequest, "Insufficient stock")
 		return
 	}
 
@@ -40,33 +46,43 @@ func AddToCart(c *gin.Context) {
 
 	if err == nil {
 		cart.Quantity += body.Quantity
-		config.DB.Save(&cart)
-	} else {
+		if err := config.DB.Save(&cart).Error; err != nil {
+			utils.RespondError(c, http.StatusInternalServerError, "Failed to update cart")
+			return
+		}
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		cart = models.Cart{
 			UserID:    userID,
 			ProductID: body.ProductID,
 			Quantity:  body.Quantity,
 		}
-		config.DB.Create(&cart)
+		if err := config.DB.Create(&cart).Error; err != nil {
+			utils.RespondError(c, http.StatusInternalServerError, "Failed to add item to cart")
+			return
+		}
+	} else {
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to load cart")
+		return
 	}
 
-	config.DB.Preload("Product").First(&cart)
+	if err := config.DB.Preload("Product").First(&cart, cart.ID).Error; err != nil {
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to load updated cart item")
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Cart updated",
+	utils.RespondSuccess(c, http.StatusOK, "Cart updated", gin.H{
 		"cart": gin.H{
 			"id":       cart.ID,
 			"quantity": cart.Quantity,
 			"product": gin.H{
-				"id":    cart.Product.ID,
-	            "name":  cart.Product.Name,
-	            "price": cart.Product.Price,
-	            "image_url": cart.Product.ImageURL,
+				"id":        cart.Product.ID,
+				"name":      cart.Product.Name,
+				"price":     cart.Product.Price,
+				"image_url": cart.Product.ImageURL,
 			},
 		},
 	})
 }
-
 
 func GetCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
@@ -77,7 +93,7 @@ func GetCart(c *gin.Context) {
 		Where("user_id = ?", userID).
 		Find(&cartItems).Error; err != nil {
 
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch cart")
 		return
 	}
 
@@ -96,17 +112,18 @@ func GetCart(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.RespondSuccess(c, http.StatusOK, "Cart loaded", gin.H{
 		"cart": response,
 	})
 }
+
 func UpdateCartQuantity(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
 	cartIDParam := c.Param("id")
 	cartID, err := strconv.Atoi(cartIDParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cart ID"})
+		utils.RespondError(c, http.StatusBadRequest, "Invalid cart ID")
 		return
 	}
 
@@ -115,7 +132,7 @@ func UpdateCartQuantity(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.RespondBindError(c, err)
 		return
 	}
 
@@ -124,57 +141,55 @@ func UpdateCartQuantity(c *gin.Context) {
 		Where("id = ? AND user_id = ?", cartID, userID).
 		First(&cart).Error; err != nil {
 
-		c.JSON(http.StatusNotFound, gin.H{"error": "Cart item not found"})
+		utils.RespondError(c, http.StatusNotFound, "Cart item not found")
 		return
 	}
 
 	// ✅ Check stock
 	var product models.Product
 	if err := config.DB.First(&product, cart.ProductID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Product not found"})
+		utils.RespondError(c, http.StatusNotFound, "Product not found")
 		return
 	}
 
 	if product.Stock < body.Quantity {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient stock"})
+		utils.RespondError(c, http.StatusBadRequest, "Insufficient stock")
 		return
 	}
 
-	// ✅ Update quantity
 	cart.Quantity = body.Quantity
-	config.DB.Save(&cart)
+	if err := config.DB.Save(&cart).Error; err != nil {
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to update quantity")
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Quantity updated",
-	})
+	utils.RespondSuccess(c, http.StatusOK, "Quantity updated", nil)
 }
+
 func RemoveFromCart(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	cartIDParam := c.Param("id")
-    cartID, err := strconv.Atoi(cartIDParam)
-    if err != nil {
-	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cart ID"})
-	return
-   }
+	cartID, err := strconv.Atoi(cartIDParam)
+	if err != nil {
+		utils.RespondError(c, http.StatusBadRequest, "Invalid cart ID")
+		return
+	}
 	var cart models.Cart
 
-	// Check if the item exists and belongs to the user
 	if err := config.DB.
 		Where("id = ? AND user_id = ?", cartID, userID).
 		First(&cart).Error; err != nil {
 
-		c.JSON(404, gin.H{"error": "Cart item not found"})
+		utils.RespondError(c, http.StatusNotFound, "Cart item not found")
 		return
 	}
 
-	// Delete the item
 	if err := config.DB.Delete(&cart).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to remove item"})
+		utils.RespondError(c, http.StatusInternalServerError, "Failed to remove item")
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"message": "Item removed from cart",
-		"id":      cart.ID,
+	utils.RespondSuccess(c, http.StatusOK, "Item removed from cart", gin.H{
+		"id": cart.ID,
 	})
 }

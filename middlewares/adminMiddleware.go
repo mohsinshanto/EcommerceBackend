@@ -3,6 +3,7 @@ package middlewares
 import (
 	"ecommerce-backend/config"
 	"ecommerce-backend/models"
+	"ecommerce-backend/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,10 +14,14 @@ func AdminOnly() gin.HandlerFunc {
 		userID := c.GetUint("user_id")
 
 		var user models.User
-		config.DB.First(&user, userID)
+		if err := config.DB.First(&user, userID).Error; err != nil {
+			utils.RespondError(c, http.StatusUnauthorized, "User not found")
+			c.Abort()
+			return
+		}
 
 		if !user.IsAdmin {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Admin access only"})
+			utils.RespondError(c, http.StatusForbidden, "Admin access only")
 			c.Abort()
 			return
 		}

@@ -13,7 +13,7 @@ import (
 // 		// Public
 // 		api.POST("/register", controllers.Register)
 // 		api.POST("/login", controllers.Login)
-       
+
 // 		// User authenticated
 // 		api.Use(middlewares.AuthMiddleware())
 // 		{
@@ -30,18 +30,18 @@ import (
 // 			// Orders
 // 			api.POST("/order", controllers.CreateOrder)
 // 			api.GET("/orders", controllers.GetMyOrders)
-			
+
 // 		}
 
-// 		// Admin-only
-// 		api.Use(middlewares.AuthMiddleware(), middlewares.AdminOnly())
-// 		{
-// 			api.POST("/products", controllers.CreateProduct)
-// 			api.DELETE("/products/:id", controllers.DeleteProduct)
-// 			api.GET("/admin/orders", controllers.GetAllOrders)
-// 		}
-// 	}
-// }
+//			// Admin-only
+//			api.Use(middlewares.AuthMiddleware(), middlewares.AdminOnly())
+//			{
+//				api.POST("/products", controllers.CreateProduct)
+//				api.DELETE("/products/:id", controllers.DeleteProduct)
+//				api.GET("/admin/orders", controllers.GetAllOrders)
+//			}
+//		}
+//	}
 func SetupRoutes(r *gin.Engine) {
 
 	// Base API group
@@ -68,6 +68,7 @@ func SetupRoutes(r *gin.Engine) {
 		// Orders
 		auth.POST("/order", controllers.CreateOrder)
 		auth.GET("/orders", controllers.GetMyOrders)
+		auth.PATCH("/orders/:id/archive", controllers.ArchiveOrder)
 	}
 
 	// ---------------- ADMIN ----------------

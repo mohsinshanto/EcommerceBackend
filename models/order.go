@@ -6,4 +6,5 @@ type Order struct {
 	gorm.Model
 	UserID     uint
 	TotalPrice float64
+	Archived   bool `gorm:"default:false"`
 }
