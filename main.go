@@ -6,6 +6,8 @@ import (
 	"ecommerce-backend/routes"
 	"ecommerce-backend/utils"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -22,9 +24,15 @@ func main() {
 		&models.Order{},
 		&models.OrderItem{},
 	)
+
+	frontendOrigins := []string{"http://localhost:3000"}
+	if configuredOrigins := os.Getenv("FRONTEND_ORIGINS"); configuredOrigins != "" {
+		frontendOrigins = splitAndTrim(configuredOrigins)
+	}
+
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     frontendOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -41,4 +49,22 @@ func main() {
 	routes.SetupRoutes(r)
 
 	r.Run(":8080")
+}
+
+func splitAndTrim(value string) []string {
+	parts := strings.Split(value, ",")
+	origins := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+
+	if len(origins) == 0 {
+		return []string{"http://localhost:3000"}
+	}
+
+	return origins
 }
