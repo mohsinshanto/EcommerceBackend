@@ -7,12 +7,34 @@ import (
 	"ecommerce-backend/utils"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 func CreateOrder(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	var req dto.CreateOrderRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.RespondBindError(c, err)
+		return
+	}
+
+	req.CustomerName = strings.TrimSpace(req.CustomerName)
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.AddressLine = strings.TrimSpace(req.AddressLine)
+	req.City = strings.TrimSpace(req.City)
+	req.Area = strings.TrimSpace(req.Area)
+	req.PostalCode = strings.TrimSpace(req.PostalCode)
+	req.Notes = strings.TrimSpace(req.Notes)
+
+	if req.CustomerName == "" || req.Phone == "" || req.AddressLine == "" || req.City == "" || req.Area == "" {
+		utils.RespondError(c, http.StatusBadRequest, "Please complete the delivery information")
+		return
+	}
+
+	paymentMethod := "Cash on Delivery"
 
 	// Start DB transaction
 	tx := config.DB.Begin()
@@ -35,7 +57,18 @@ func CreateOrder(c *gin.Context) {
 	}
 
 	// 2. Create initial order (total price = 0 for now)
-	order := models.Order{UserID: userID}
+	order := models.Order{
+		UserID:        userID,
+		CustomerName:  req.CustomerName,
+		Phone:         req.Phone,
+		AddressLine:   req.AddressLine,
+		City:          req.City,
+		Area:          req.Area,
+		PostalCode:    req.PostalCode,
+		Notes:         req.Notes,
+		PaymentMethod: paymentMethod,
+		Status:        "Pending",
+	}
 	if err := tx.Create(&order).Error; err != nil {
 		tx.Rollback()
 		utils.RespondError(c, http.StatusInternalServerError, "Failed to create order")
@@ -81,7 +114,9 @@ func CreateOrder(c *gin.Context) {
 	}
 
 	// 4. Update order total
-	if err := tx.Model(&order).Update("total_price", total).Error; err != nil {
+	if err := tx.Model(&order).Updates(map[string]interface{}{
+		"total_price": total,
+	}).Error; err != nil {
 		tx.Rollback()
 		utils.RespondError(c, http.StatusInternalServerError, "Failed to update order total")
 		return
@@ -104,6 +139,7 @@ func CreateOrder(c *gin.Context) {
 	utils.RespondSuccess(c, http.StatusCreated, "Order placed successfully", gin.H{
 		"order_id":  order.ID,
 		"totalPaid": total,
+		"status":    order.Status,
 	})
 }
 
