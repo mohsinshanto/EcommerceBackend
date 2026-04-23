@@ -4,8 +4,8 @@ import "gorm.io/gorm"
 
 type OrderItem struct {
 	gorm.Model
-	OrderID   uint
-	ProductID uint
+	OrderID   uint `gorm:"index"`
+	ProductID uint `gorm:"index"`
 	Quantity  int
 	Price     float64
 }
