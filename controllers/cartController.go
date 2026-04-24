@@ -34,23 +34,29 @@ func AddToCart(c *gin.Context) {
 		return
 	}
 
-	if product.Stock < body.Quantity {
-		utils.RespondError(c, http.StatusBadRequest, "Insufficient stock")
-		return
-	}
-
 	var cart models.Cart
 	err := config.DB.
 		Where("user_id = ? AND product_id = ?", userID, body.ProductID).
 		First(&cart).Error
 
 	if err == nil {
-		cart.Quantity += body.Quantity
+		newQuantity := cart.Quantity + body.Quantity
+		if product.Stock < newQuantity {
+			utils.RespondError(c, http.StatusBadRequest, "Insufficient stock")
+			return
+		}
+
+		cart.Quantity = newQuantity
 		if err := config.DB.Save(&cart).Error; err != nil {
 			utils.RespondError(c, http.StatusInternalServerError, "Failed to update cart")
 			return
 		}
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		if product.Stock < body.Quantity {
+			utils.RespondError(c, http.StatusBadRequest, "Insufficient stock")
+			return
+		}
+
 		cart = models.Cart{
 			UserID:    userID,
 			ProductID: body.ProductID,

@@ -5,7 +5,6 @@ import (
 	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
 	"ecommerce-backend/utils"
-	"math"
 	"net/http"
 	"strconv"
 
@@ -14,7 +13,6 @@ import (
 
 func GetProducts(c *gin.Context) {
 	var products []models.Product
-	var total int64
 
 	// --- Query params ---
 	search := c.Query("search")
@@ -70,12 +68,6 @@ func GetProducts(c *gin.Context) {
 		query = query.Where("price <= ?", max)
 	}
 
-	// --- Count total (before pagination) ---
-	if err := query.Count(&total).Error; err != nil {
-		utils.RespondError(c, http.StatusInternalServerError, "Failed to count products")
-		return
-	}
-
 	// --- Sorting ---
 	switch sort {
 	case "price_asc":
@@ -87,9 +79,14 @@ func GetProducts(c *gin.Context) {
 	}
 
 	// --- Pagination & Execution ---
-	if err := query.Limit(limit).Offset(offset).Find(&products).Error; err != nil {
+	if err := query.Limit(limit + 1).Offset(offset).Find(&products).Error; err != nil {
 		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch products")
 		return
+	}
+
+	hasNext := len(products) > limit
+	if hasNext {
+		products = products[:limit]
 	}
 
 	// --- Response mapping ---
@@ -108,11 +105,11 @@ func GetProducts(c *gin.Context) {
 
 	// --- Final JSON response ---
 	utils.RespondSuccess(c, http.StatusOK, "Products loaded", gin.H{
-		"products":  response,
-		"total":     total,
-		"page":      page,
-		"limit":     limit,
-		"last_page": int(math.Ceil(float64(total) / float64(limit))),
+		"products": response,
+		"page":     page,
+		"limit":    limit,
+		"has_next": hasNext,
+		"has_prev": page > 1,
 	})
 }
 

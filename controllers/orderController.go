@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm/clause"
 )
 
 func CreateOrder(c *gin.Context) {
@@ -45,7 +46,11 @@ func CreateOrder(c *gin.Context) {
 
 	// 1. Load user's cart with product info
 	var cart []models.Cart
-	if err := tx.Preload("Product").Where("user_id = ?", userID).Find(&cart).Error; err != nil {
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Product").
+		Where("user_id = ?", userID).
+		Find(&cart).Error; err != nil {
 		tx.Rollback()
 		utils.RespondError(c, http.StatusInternalServerError, "Failed to load cart")
 		return
@@ -79,7 +84,12 @@ func CreateOrder(c *gin.Context) {
 
 	// 3. Loop through each cart item
 	for _, item := range cart {
-		product := item.Product
+		var product models.Product
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, item.ProductID).Error; err != nil {
+			tx.Rollback()
+			utils.RespondError(c, http.StatusNotFound, "Product not found")
+			return
+		}
 
 		// Stock validation
 		if product.Stock < item.Quantity {
