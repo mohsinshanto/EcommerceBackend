@@ -16,6 +16,7 @@ import (
 func main() {
 	config.LoadEnv()
 	config.LoadJWTSecret()
+	config.InitRedis()
 	config.ConnectDB()
 	config.DB.AutoMigrate(
 		&models.User{},

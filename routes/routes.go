@@ -6,42 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// func SetupRoutes(r *gin.Engine) {
-// 	api := r.Group("/api")
-// 	{
-
-// 		// Public
-// 		api.POST("/register", controllers.Register)
-// 		api.POST("/login", controllers.Login)
-
-// 		// User authenticated
-// 		api.Use(middlewares.AuthMiddleware())
-// 		{
-// 			// Products (user can view)
-// 			api.GET("/products", controllers.GetProducts)
-// 			api.GET("/products/:id", controllers.GetProductByID)
-
-// 			// Cart
-// 			api.POST("/cart", controllers.AddToCart)
-// 			api.GET("/cart", controllers.GetCart)
-// 			api.PUT("/cart/:id", controllers.UpdateCartQuantity)
-// 			api.DELETE("/cart/:id", controllers.RemoveFromCart)
-
-// 			// Orders
-// 			api.POST("/order", controllers.CreateOrder)
-// 			api.GET("/orders", controllers.GetMyOrders)
-
-// 		}
-
-//			// Admin-only
-//			api.Use(middlewares.AuthMiddleware(), middlewares.AdminOnly())
-//			{
-//				api.POST("/products", controllers.CreateProduct)
-//				api.DELETE("/products/:id", controllers.DeleteProduct)
-//				api.GET("/admin/orders", controllers.GetAllOrders)
-//			}
-//		}
-//	}
 func SetupRoutes(r *gin.Engine) {
 
 	// Base API group
@@ -57,6 +21,7 @@ func SetupRoutes(r *gin.Engine) {
 	{
 		// Products
 		auth.GET("/products", controllers.GetProducts)
+		auth.GET("/products/count", controllers.GetProductCount)
 		auth.GET("/products/:id", controllers.GetProductByID)
 
 		// Cart
