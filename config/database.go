@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -22,6 +23,21 @@ func ConnectDB() {
 	if err != nil {
 		panic("Failed to connect database!" + err.Error())
 	}
+
+	sqlDB, err := database.DB()
+	if err != nil {
+		panic("Failed to access database handle!" + err.Error())
+	}
+
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+
+	if err := sqlDB.Ping(); err != nil {
+		panic("Failed to ping database!" + err.Error())
+	}
+
 	DB = database
 	fmt.Println("Database connected")
 }

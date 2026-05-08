@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"ecommerce-backend/config"
 	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
@@ -83,10 +84,17 @@ func Login(c *gin.Context) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	var user models.User
-	err := config.DB.Where("email = ?", req.Email).First(&user).Error
+	queryCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	err := config.DB.WithContext(queryCtx).Where("email = ?", req.Email).First(&user).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		utils.RespondError(c, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		utils.RespondError(c, http.StatusGatewayTimeout, "Login request timed out while contacting the database")
 		return
 	}
 	if err != nil {

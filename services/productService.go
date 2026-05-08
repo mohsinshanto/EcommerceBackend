@@ -1,10 +1,13 @@
 package services
 
 import (
+	"context"
 	"ecommerce-backend/config"
 	"ecommerce-backend/dto"
 	"ecommerce-backend/models"
 	"strconv"
+	"strings"
+	"time"
 )
 
 const productCountCacheKey = "product:count"
@@ -21,17 +24,21 @@ type GetProductsParams struct {
 
 func GetProducts(params GetProductsParams) ([]dto.ProductResponse, int64, bool, error) {
 	var products []models.Product
+	queryCtx, cancel := context.WithTimeout(config.Ctx, 5*time.Second)
+	defer cancel()
 
 	offset := (params.Page - 1) * params.Limit
 
-	query := config.DB.Model(&models.Product{})
+	query := config.DB.WithContext(queryCtx).Model(&models.Product{})
 
 	// search
 	if params.Search != "" {
-		query = query.Where(
-			"name LIKE ? OR description LIKE ?",
-			"%"+params.Search+"%", "%"+params.Search+"%",
-		)
+		if fullTextQuery := buildProductSearchQuery(params.Search); fullTextQuery != "" {
+			query = query.Where(
+				"MATCH(name) AGAINST(? IN BOOLEAN MODE)",
+				fullTextQuery,
+			)
+		}
 	}
 
 	// category
@@ -153,7 +160,10 @@ func GetProductCount() (int64, error) {
 	}
 
 	var count int64
-	if err := config.DB.Model(&models.Product{}).Count(&count).Error; err != nil {
+	queryCtx, cancel := context.WithTimeout(config.Ctx, 5*time.Second)
+	defer cancel()
+
+	if err := config.DB.WithContext(queryCtx).Model(&models.Product{}).Count(&count).Error; err != nil {
 		return 0, err
 	}
 
@@ -180,4 +190,23 @@ func GetProductByID(id int) (dto.ProductResponse, error) {
 		ImageURL:    product.ImageURL,
 		Category:    product.Category,
 	}, nil
+}
+
+func buildProductSearchQuery(search string) string {
+	terms := strings.Fields(search)
+	if len(terms) == 0 {
+		return ""
+	}
+
+	processed := make([]string, 0, len(terms))
+	for _, term := range terms {
+		cleaned := strings.Trim(term, `+-<>~*"()@`)
+		if cleaned == "" {
+			continue
+		}
+
+		processed = append(processed, cleaned)
+	}
+
+	return strings.Join(processed, " ")
 }
