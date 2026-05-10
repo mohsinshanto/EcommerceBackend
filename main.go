@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"ecommerce-backend/config"
 	"ecommerce-backend/models"
 	"ecommerce-backend/routes"
+	"ecommerce-backend/services"
 	"ecommerce-backend/utils"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -18,6 +21,7 @@ func main() {
 	config.LoadJWTSecret()
 	config.InitRedis()
 	config.ConnectDB()
+	config.InitTypesense()
 	config.DB.AutoMigrate(
 		&models.User{},
 		&models.Product{},
@@ -25,6 +29,10 @@ func main() {
 		&models.Order{},
 		&models.OrderItem{},
 	)
+
+	if err := services.EnsureTypesenseProductsCollection(context.Background()); err != nil {
+		log.Printf("WARNING: failed to ensure Typesense products collection: %v", err)
+	}
 
 	frontendOrigins := []string{"http://localhost:3000"}
 	if configuredOrigins := os.Getenv("FRONTEND_ORIGINS"); configuredOrigins != "" {
