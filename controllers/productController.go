@@ -30,13 +30,16 @@ func GetProducts(c *gin.Context) {
 		return
 	}
 
+	categoryCounts := services.GetCategoryCounts(params)
+
 	utils.RespondSuccess(c, http.StatusOK, "Products loaded", gin.H{
-		"products": products,
-		"count":    count,
-		"page":     page,
-		"limit":    limit,
-		"has_next": hasNext,
-		"has_prev": page > 1,
+		"products":        products,
+		"count":           count,
+		"category_counts": categoryCounts,
+		"page":            page,
+		"limit":           limit,
+		"has_next":        hasNext,
+		"has_prev":        page > 1,
 	})
 }
 

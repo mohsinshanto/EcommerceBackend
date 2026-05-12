@@ -117,6 +117,33 @@ func GetProducts(params GetProductsParams) ([]dto.ProductResponse, int64, bool, 
 	return response, totalCount, hasNext, nil
 }
 
+func GetCategoryCounts(params GetProductsParams) map[string]int {
+	defaultCounts := map[string]int{
+		"mobile":      0,
+		"laptop":      0,
+		"audio":       0,
+		"accessories": 0,
+	}
+
+	if config.Typesense == nil {
+		return defaultCounts
+	}
+
+	queryCtx, cancel := context.WithTimeout(config.Ctx, 5*time.Second)
+	defer cancel()
+
+	counts, err := GetCategoryCountsWithTypesense(queryCtx, params)
+	if err != nil {
+		return defaultCounts
+	}
+
+	for key, value := range counts {
+		defaultCounts[key] = value
+	}
+
+	return defaultCounts
+}
+
 func getProductsWithRankedSearch(
 	queryCtx context.Context,
 	params GetProductsParams,

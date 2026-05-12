@@ -46,6 +46,13 @@ type typesenseSearchResponse struct {
 	Hits  []struct {
 		Document typesenseProductDocument `json:"document"`
 	} `json:"hits"`
+	FacetCounts []struct {
+		FieldName string `json:"field_name"`
+		Counts    []struct {
+			Count int    `json:"count"`
+			Value string `json:"value"`
+		} `json:"counts"`
+	} `json:"facet_counts"`
 }
 
 func EnsureTypesenseProductsCollection(ctx context.Context) error {
@@ -189,6 +196,57 @@ func SearchProductsWithTypesense(ctx context.Context, params GetProductsParams) 
 	return products, hasNext, nil
 }
 
+func GetCategoryCountsWithTypesense(ctx context.Context, params GetProductsParams) (map[string]int, error) {
+	if config.Typesense == nil {
+		return nil, fmt.Errorf("typesense is not enabled")
+	}
+
+	if err := EnsureTypesenseProductsCollection(ctx); err != nil {
+		return nil, err
+	}
+
+	query := url.Values{}
+	query.Set("q", wildcardQueryIfEmpty(strings.TrimSpace(params.Search)))
+	query.Set("query_by", "name")
+	query.Set("prefix", "false")
+	query.Set("per_page", "0")
+	query.Set("facet_by", "category")
+	query.Set("max_facet_values", "20")
+
+	filterBy := buildTypesenseFilterWithoutCategory(params)
+	if filterBy != "" {
+		query.Set("filter_by", filterBy)
+	}
+
+	body, _, err := config.Typesense.Request(
+		ctx,
+		http.MethodGet,
+		"/collections/"+config.Typesense.Collection()+"/documents/search",
+		query,
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var response typesenseSearchResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]int)
+	for _, facet := range response.FacetCounts {
+		if facet.FieldName != "category" {
+			continue
+		}
+		for _, item := range facet.Counts {
+			counts[item.Value] = item.Count
+		}
+	}
+
+	return counts, nil
+}
+
 func typesenseProductDocumentFromModel(product models.Product) typesenseProductDocument {
 	return typesenseProductDocument{
 		ID:          strconv.FormatUint(uint64(product.ID), 10),
@@ -224,6 +282,24 @@ func buildTypesenseFilter(params GetProductsParams) string {
 	return strings.Join(filters, " && ")
 }
 
+func buildTypesenseFilterWithoutCategory(params GetProductsParams) string {
+	filters := make([]string, 0, 2)
+
+	if params.MinPrice != "" {
+		if min, err := strconv.ParseFloat(params.MinPrice, 64); err == nil {
+			filters = append(filters, fmt.Sprintf("price:>=%s", strconv.FormatFloat(min, 'f', -1, 64)))
+		}
+	}
+
+	if params.MaxPrice != "" {
+		if maxValue, err := strconv.ParseFloat(params.MaxPrice, 64); err == nil {
+			filters = append(filters, fmt.Sprintf("price:<=%s", strconv.FormatFloat(maxValue, 'f', -1, 64)))
+		}
+	}
+
+	return strings.Join(filters, " && ")
+}
+
 func escapeTypesenseFilterValue(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.ContainsAny(value, ",` ") {
@@ -238,6 +314,13 @@ func parseUintDocumentID(value string) uint {
 		return 0
 	}
 	return uint(parsed)
+}
+
+func wildcardQueryIfEmpty(search string) string {
+	if search == "" {
+		return "*"
+	}
+	return search
 }
 
 func SyncAllProductsToTypesense(ctx context.Context, batchSize int) error {
