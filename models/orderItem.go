@@ -8,4 +8,5 @@ type OrderItem struct {
 	ProductID uint `gorm:"index"`
 	Quantity  int
 	Price     float64
+	Product   Product `gorm:"foreignKey:ProductID"`
 }

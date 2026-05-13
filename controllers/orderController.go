@@ -204,14 +204,57 @@ func ArchiveOrder(c *gin.Context) {
 
 // Admin-only: Get all orders
 func GetAllOrders(c *gin.Context) {
-	var orders []models.Order
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "8"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 8
+	}
 
-	if err := config.DB.Find(&orders).Error; err != nil {
+	statusFilter := strings.ToLower(strings.TrimSpace(c.DefaultQuery("archived", "active")))
+	offset := (page - 1) * limit
+
+	var orders []models.Order
+	query := config.DB.Model(&models.Order{})
+
+	switch statusFilter {
+	case "archived":
+		query = query.Where("archived = ?", true)
+	case "all":
+	default:
+		query = query.Where("archived = ?", false)
+		statusFilter = "active"
+	}
+
+	if err := query.
+		Preload("User").
+		Preload("Items.Product").
+		Order("created_at DESC").
+		Limit(limit + 1).
+		Offset(offset).
+		Find(&orders).Error; err != nil {
 		utils.RespondError(c, http.StatusInternalServerError, "Failed to fetch orders")
 		return
 	}
 
+	hasNext := len(orders) > limit
+	if hasNext {
+		orders = orders[:limit]
+	}
+
+	response := make([]dto.AdminOrderResponse, 0, len(orders))
+	for _, order := range orders {
+		response = append(response, dto.ToAdminOrderResponse(order))
+	}
+
 	utils.RespondSuccess(c, http.StatusOK, "Orders loaded", gin.H{
-		"orders": orders,
+		"orders":   response,
+		"page":     page,
+		"limit":    limit,
+		"has_next": hasNext,
+		"has_prev": page > 1,
+		"archived": statusFilter,
 	})
 }
