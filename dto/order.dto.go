@@ -15,8 +15,10 @@ type OrderResponse struct {
 	PostalCode    string    `json:"postal_code"`
 	Notes         string    `json:"notes"`
 	PaymentMethod string    `json:"payment_method"`
+	PaymentStatus string    `json:"payment_status"`
 	Status        string    `json:"status"`
 	TotalPrice    float64   `json:"total_price"`
+	TransactionID string    `json:"transaction_id"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -40,8 +42,16 @@ type AdminOrderResponse struct {
 	PostalCode    string                   `json:"postal_code"`
 	Notes         string                   `json:"notes"`
 	PaymentMethod string                   `json:"payment_method"`
+	PaymentStatus string                   `json:"payment_status"`
 	Status        string                   `json:"status"`
 	TotalPrice    float64                  `json:"total_price"`
+	TransactionID string                   `json:"transaction_id"`
+	ValidationID  string                   `json:"validation_id"`
+	SessionKey    string                   `json:"session_key"`
+	BankTranID    string                   `json:"bank_tran_id"`
+	Currency      string                   `json:"currency"`
+	GatewayAmount float64                  `json:"gateway_amount"`
+	CardType      string                   `json:"card_type"`
 	Archived      bool                     `json:"archived"`
 	CreatedAt     time.Time                `json:"created_at"`
 	Items         []AdminOrderItemResponse `json:"items"`
@@ -55,7 +65,7 @@ type CreateOrderRequest struct {
 	Area          string `json:"area" binding:"required"`
 	PostalCode    string `json:"postal_code"`
 	Notes         string `json:"notes"`
-	PaymentMethod string `json:"payment_method" binding:"required,oneof=cod"`
+	PaymentMethod string `json:"payment_method" binding:"required,oneof=cod sslcommerz"`
 }
 
 // Convert Order model to OrderResponse DTO
@@ -70,8 +80,10 @@ func ToOrderResponse(order models.Order) OrderResponse {
 		PostalCode:    order.PostalCode,
 		Notes:         order.Notes,
 		PaymentMethod: order.PaymentMethod,
+		PaymentStatus: order.PaymentStatus,
 		Status:        order.Status,
 		TotalPrice:    order.TotalPrice,
+		TransactionID: order.TransactionID,
 		CreatedAt:     order.CreatedAt,
 	}
 }
@@ -100,8 +112,16 @@ func ToAdminOrderResponse(order models.Order) AdminOrderResponse {
 		PostalCode:    order.PostalCode,
 		Notes:         order.Notes,
 		PaymentMethod: order.PaymentMethod,
+		PaymentStatus: order.PaymentStatus,
 		Status:        order.Status,
 		TotalPrice:    order.TotalPrice,
+		TransactionID: order.TransactionID,
+		ValidationID:  order.ValidationID,
+		SessionKey:    order.SessionKey,
+		BankTranID:    order.BankTranID,
+		Currency:      order.Currency,
+		GatewayAmount: order.GatewayAmount,
+		CardType:      order.CardType,
 		Archived:      order.Archived,
 		CreatedAt:     order.CreatedAt,
 		Items:         items,

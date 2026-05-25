@@ -19,6 +19,7 @@ import (
 func main() {
 	config.LoadEnv()
 	config.LoadJWTSecret()
+	config.InitSSLCommerz()
 	config.InitRedis()
 	config.ConnectDB()
 	config.InitTypesense()

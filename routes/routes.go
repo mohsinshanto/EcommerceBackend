@@ -14,6 +14,13 @@ func SetupRoutes(r *gin.Engine) {
 	// ---------------- PUBLIC ----------------
 	api.POST("/register", controllers.Register)
 	api.POST("/login", controllers.Login)
+	api.POST("/payments/sslcommerz/success", controllers.SSLCommerzSuccess)
+	api.POST("/payments/sslcommerz/fail", controllers.SSLCommerzFail)
+	api.POST("/payments/sslcommerz/cancel", controllers.SSLCommerzCancel)
+	api.POST("/payments/sslcommerz/ipn", controllers.SSLCommerzIPN)
+	api.GET("/payments/sslcommerz/success", controllers.SSLCommerzSuccess)
+	api.GET("/payments/sslcommerz/fail", controllers.SSLCommerzFail)
+	api.GET("/payments/sslcommerz/cancel", controllers.SSLCommerzCancel)
 
 	// ---------------- USER AUTH ----------------
 	auth := api.Group("/")
