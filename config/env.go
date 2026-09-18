@@ -1,51 +1,22 @@
 package config
 
 import (
-	"bufio"
 	"log"
 	"os"
-	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 func LoadEnv() {
-	for _, path := range []string{".env", "ecommerce-backend/.env"} {
-		if err := loadEnvFile(path); err == nil {
-			return
-		}
+	if err := godotenv.Load(".env"); err != nil {
+		log.Println("No .env file found")
 	}
 }
 
-func loadEnvFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, found := strings.Cut(line, "=")
-		if !found {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if key == "" {
-			continue
-		}
-
-		if _, exists := os.LookupEnv(key); !exists {
-			if err := os.Setenv(key, value); err != nil {
-				log.Printf("WARNING: failed to set env %s from %s: %v", key, path, err)
-			}
-		}
+func GetEnv(key string, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
 
-	return scanner.Err()
+	return fallback
 }

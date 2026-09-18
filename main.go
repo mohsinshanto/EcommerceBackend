@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"ecommerce-backend/config"
-	"ecommerce-backend/models"
-	"ecommerce-backend/routes"
-	"ecommerce-backend/services"
+	"ecommerce-backend/internal/module/cart"
+	"ecommerce-backend/internal/module/order"
+	"ecommerce-backend/internal/module/product"
+	"ecommerce-backend/internal/module/user"
 	"ecommerce-backend/utils"
 	"log"
 	"net/http"
@@ -24,14 +25,14 @@ func main() {
 	config.ConnectDB()
 	config.InitTypesense()
 	config.DB.AutoMigrate(
-		&models.User{},
-		&models.Product{},
-		&models.Cart{},
-		&models.Order{},
-		&models.OrderItem{},
+		&user.User{},
+		&product.Product{},
+		&cart.Cart{},
+		&order.Order{},
+		&order.OrderItem{},
 	)
 
-	if err := services.EnsureTypesenseProductsCollection(context.Background()); err != nil {
+	if err := product.EnsureTypesenseProductsCollection(context.Background()); err != nil {
 		log.Printf("WARNING: failed to ensure Typesense products collection: %v", err)
 	}
 
@@ -39,7 +40,10 @@ func main() {
 	if configuredOrigins := os.Getenv("FRONTEND_ORIGINS"); configuredOrigins != "" {
 		frontendOrigins = splitAndTrim(configuredOrigins)
 	}
-
+	userModule := user.NewModule(config.DB)
+	productModule := product.NewModule(config.DB)
+	cartModule := cart.NewModule(config.DB)
+	orderModule := order.NewModule(config.DB)
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     frontendOrigins,
@@ -55,10 +59,13 @@ func main() {
 	r.NoMethod(func(c *gin.Context) {
 		utils.RespondError(c, http.StatusMethodNotAllowed, "Method not allowed")
 	})
-
-	routes.SetupRoutes(r)
-
-	r.Run(":8080")
+	userModule.RegisterRoutes(r)
+	productModule.RegisterRoutes(r)
+	cartModule.RegisterRoutes(r)
+	orderModule.RegisterRoutes(r)
+	if err := r.Run(":8080"); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func splitAndTrim(value string) []string {
