@@ -9,12 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// OrderController handles HTTP requests for the order module.
 type OrderController struct {
-	service *OrderService
+	service OrderService
 }
 
-func NewOrderController(service *OrderService) *OrderController {
+func NewOrderController(service OrderService) *OrderController {
 	return &OrderController{service: service}
 }
 
@@ -26,14 +25,14 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	c.service.NormalizeOrderRequest(&req)
-	if err := c.service.ValidateOrderRequest(req); err != nil {
+	NormalizeOrderRequest(&req)
+	if err := ValidateOrderRequest(req); err != nil {
 		utils.RespondError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	switch strings.ToLower(req.PaymentMethod) {
-	case "cod", "cash":
+	case "cod":
 		createdOrder, err := c.service.CreateCashOnDeliveryOrder(ctx.Request.Context(), userID, req)
 		if err != nil {
 			utils.RespondError(ctx, http.StatusBadRequest, err.Error())

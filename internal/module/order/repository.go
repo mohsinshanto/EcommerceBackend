@@ -6,33 +6,27 @@ import (
 	"gorm.io/gorm"
 )
 
-// OrderRepositoryImpl implements the order repository for the order module.
-type OrderRepositoryImpl struct {
-	db *gorm.DB
-}
-
 type OrderRepository interface {
 	GetByID(ctx context.Context, id uint) (*Order, error)
 	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
 	GetAll(ctx context.Context) ([]Order, error)
-	Create(ctx context.Context, order *Order) error
+	Create(ctx context.Context, tx *gorm.DB, order *Order) error
 	Update(ctx context.Context, order *Order) error
 	Delete(ctx context.Context, id uint) error
+	TransactionDB(ctx context.Context) *gorm.DB
 }
 
-type OrderItemRepository interface {
-	GetByOrderID(ctx context.Context, orderID uint) ([]OrderItem, error)
-	Create(ctx context.Context, item *OrderItem) error
-	Update(ctx context.Context, item *OrderItem) error
-	Delete(ctx context.Context, id uint) error
+type orderRepository struct {
+	db *gorm.DB
 }
 
-// NewOrderRepository creates an order repository implementation scoped to the order module.
 func NewOrderRepository(db *gorm.DB) OrderRepository {
-	return &OrderRepositoryImpl{db: db}
+	return &orderRepository{db: db}
 }
-
-func (r *OrderRepositoryImpl) GetByID(ctx context.Context, id uint) (*Order, error) {
+func (r *orderRepository) TransactionDB(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).Begin()
+}
+func (r *orderRepository) GetByID(ctx context.Context, id uint) (*Order, error) {
 	var order Order
 	if err := r.db.WithContext(ctx).Preload("Items").Preload("User").First(&order, id).Error; err != nil {
 		return nil, err
@@ -40,7 +34,7 @@ func (r *OrderRepositoryImpl) GetByID(ctx context.Context, id uint) (*Order, err
 	return &order, nil
 }
 
-func (r *OrderRepositoryImpl) GetByUserID(ctx context.Context, userID uint) ([]Order, error) {
+func (r *orderRepository) GetByUserID(ctx context.Context, userID uint) ([]Order, error) {
 	var orders []Order
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Preload("Items").Order("created_at DESC").Find(&orders).Error; err != nil {
 		return nil, err
@@ -48,7 +42,7 @@ func (r *OrderRepositoryImpl) GetByUserID(ctx context.Context, userID uint) ([]O
 	return orders, nil
 }
 
-func (r *OrderRepositoryImpl) GetAll(ctx context.Context) ([]Order, error) {
+func (r *orderRepository) GetAll(ctx context.Context) ([]Order, error) {
 	var orders []Order
 	if err := r.db.WithContext(ctx).Preload("Items").Preload("User").Order("created_at DESC").Find(&orders).Error; err != nil {
 		return nil, err
@@ -56,29 +50,39 @@ func (r *OrderRepositoryImpl) GetAll(ctx context.Context) ([]Order, error) {
 	return orders, nil
 }
 
-func (r *OrderRepositoryImpl) Create(ctx context.Context, order *Order) error {
-	return r.db.WithContext(ctx).Create(order).Error
+func (r *orderRepository) Create(
+	ctx context.Context,
+	tx *gorm.DB,
+	order *Order,
+) error {
+	return tx.WithContext(ctx).Create(order).Error
 }
 
-func (r *OrderRepositoryImpl) Update(ctx context.Context, order *Order) error {
+func (r *orderRepository) Update(ctx context.Context, order *Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
 }
 
-func (r *OrderRepositoryImpl) Delete(ctx context.Context, id uint) error {
+func (r *orderRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&Order{}, id).Error
 }
 
-// OrderItemRepositoryImpl implements the order item repository for the order module.
-type OrderItemRepositoryImpl struct {
+type OrderItemRepository interface {
+	GetByOrderID(ctx context.Context, orderID uint) ([]OrderItem, error)
+	Create(ctx context.Context, tx *gorm.DB, orderItem *OrderItem) error
+	Update(ctx context.Context, item *OrderItem) error
+	Delete(ctx context.Context, id uint) error
+	CreateMany(ctx context.Context, tx *gorm.DB, orderItems []OrderItem) error
+}
+
+type orderItemRepository struct {
 	db *gorm.DB
 }
 
-// NewOrderItemRepository creates an order item repository implementation scoped to the order module.
 func NewOrderItemRepository(db *gorm.DB) OrderItemRepository {
-	return &OrderItemRepositoryImpl{db: db}
+	return &orderItemRepository{db: db}
 }
 
-func (r *OrderItemRepositoryImpl) GetByOrderID(ctx context.Context, orderID uint) ([]OrderItem, error) {
+func (r *orderItemRepository) GetByOrderID(ctx context.Context, orderID uint) ([]OrderItem, error) {
 	var items []OrderItem
 	if err := r.db.WithContext(ctx).Where("order_id = ?", orderID).Preload("Product").Find(&items).Error; err != nil {
 		return nil, err
@@ -86,14 +90,24 @@ func (r *OrderItemRepositoryImpl) GetByOrderID(ctx context.Context, orderID uint
 	return items, nil
 }
 
-func (r *OrderItemRepositoryImpl) Create(ctx context.Context, item *OrderItem) error {
-	return r.db.WithContext(ctx).Create(item).Error
+func (r *orderItemRepository) Create(
+	ctx context.Context,
+	tx *gorm.DB,
+	orderItem *OrderItem,
+) error {
+	return tx.WithContext(ctx).Create(orderItem).Error
 }
-
-func (r *OrderItemRepositoryImpl) Update(ctx context.Context, item *OrderItem) error {
+func (r *orderItemRepository) CreateMany(
+	ctx context.Context,
+	tx *gorm.DB,
+	orderItems []OrderItem,
+) error {
+	return tx.WithContext(ctx).Create(&orderItems).Error
+}
+func (r *orderItemRepository) Update(ctx context.Context, item *OrderItem) error {
 	return r.db.WithContext(ctx).Save(item).Error
 }
 
-func (r *OrderItemRepositoryImpl) Delete(ctx context.Context, id uint) error {
+func (r *orderItemRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&OrderItem{}, id).Error
 }

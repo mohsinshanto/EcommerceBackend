@@ -1,7 +1,9 @@
 package cart
 
 import (
+	appError "ecommerce-backend/errors"
 	"ecommerce-backend/utils"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -9,10 +11,10 @@ import (
 )
 
 type CartController struct {
-	service *CartService
+	service CartService
 }
 
-func NewCartController(service *CartService) *CartController {
+func NewCartController(service CartService) *CartController {
 	return &CartController{service: service}
 }
 
@@ -22,20 +24,18 @@ func (c *CartController) AddToCart(ctx *gin.Context) {
 		utils.RespondError(ctx, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-
 	var req AddToCartRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		utils.RespondError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-
 	cartItem, err := c.service.AddToCart(ctx.Request.Context(), userID, req)
 	if err != nil {
 		utils.RespondError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	utils.RespondSuccess(ctx, http.StatusOK, "Item added to cart", gin.H{"cart": cartItem})
+	utils.RespondSuccess(ctx, http.StatusOK, "Item added to cart", cartItem)
 }
 
 func (c *CartController) GetCart(ctx *gin.Context) {
@@ -45,21 +45,13 @@ func (c *CartController) GetCart(ctx *gin.Context) {
 		return
 	}
 
-	cartItems, total, err := c.service.GetUserCart(ctx.Request.Context(), userID)
+	response, err := c.service.GetUserCart(ctx.Request.Context(), userID)
 	if err != nil {
 		utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	response := make([]gin.H, 0, len(cartItems))
-	for _, item := range cartItems {
-		response = append(response, gin.H{
-			"id": item.ID, "quantity": item.Quantity,
-			"product": gin.H{"id": item.Product.ID, "name": item.Product.Name, "price": item.Product.Price, "image_url": item.Product.ImageURL},
-		})
-	}
-
-	utils.RespondSuccess(ctx, http.StatusOK, "Cart loaded", gin.H{"items": response, "total": total})
+	utils.RespondSuccess(ctx, http.StatusOK, "Cart loaded", response)
 }
 
 func (c *CartController) UpdateCartQuantity(ctx *gin.Context) {
@@ -82,16 +74,26 @@ func (c *CartController) UpdateCartQuantity(ctx *gin.Context) {
 		utils.RespondError(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	if err := c.service.UpdateCartQuantity(ctx.Request.Context(), userID, uint(cartID), req.Quantity); err != nil {
-		if err.Error() == "unauthorized" {
-			utils.RespondError(ctx, http.StatusForbidden, "Cannot update this cart item")
-		} else {
+	err = c.service.UpdateCartQuantity(ctx.Request.Context(), userID, uint(cartID), req.Quantity)
+	if err != nil {
+		switch {
+		case errors.Is(err, appError.ErrCartNotFound),
+			errors.Is(err, appError.ErrQuantityValidation):
 			utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+		case errors.Is(err, appError.ErrInsufficientStock):
+			utils.RespondError(ctx, http.StatusConflict, err.Error())
+		case errors.Is(err, appError.ErrForbidden):
+			utils.RespondError(ctx, http.StatusForbidden, err.Error())
+		case errors.Is(err, appError.ErrProductNotFound):
+			utils.RespondError(ctx, http.StatusNotFound, err.Error())
+		default:
+			utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
+
 		}
 		return
 	}
 
+	// here to use switch to improve
 	utils.RespondSuccess(ctx, http.StatusOK, "Cart updated", nil)
 }
 
@@ -108,11 +110,18 @@ func (c *CartController) RemoveFromCart(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.service.RemoveFromCart(ctx.Request.Context(), userID, uint(cartID)); err != nil {
-		if err.Error() == "unauthorized" {
-			utils.RespondError(ctx, http.StatusForbidden, "Cannot remove this cart item")
-		} else {
+	err = c.service.RemoveFromCart(ctx.Request.Context(), userID, uint(cartID))
+	if err != nil {
+		switch {
+		case errors.Is(err, appError.ErrCartNotFound):
 			utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+		case errors.Is(err, appError.ErrForbidden):
+			utils.RespondError(ctx, http.StatusForbidden, err.Error())
+		case errors.Is(err, appError.ErrRemoveCartItem):
+			utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
+		default:
+			utils.RespondError(ctx, http.StatusInternalServerError, "internal server error")
+
 		}
 		return
 	}

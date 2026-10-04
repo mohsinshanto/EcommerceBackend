@@ -14,7 +14,6 @@ func InitRedis() {
 	RedisClient = redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-
 	_, err := RedisClient.Ping(ctx).Result()
 	if err != nil {
 		log.Fatalf("Redis connection failed: %v", err)

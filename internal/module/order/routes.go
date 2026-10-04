@@ -1,6 +1,7 @@
 package order
 
 import (
+	"ecommerce-backend/internal/module/cart"
 	"ecommerce-backend/internal/module/middleware"
 	"ecommerce-backend/internal/module/product"
 	"ecommerce-backend/internal/module/user"
@@ -18,7 +19,8 @@ func NewModule(db *gorm.DB) *Module {
 	orderItemRepo := NewOrderItemRepository(db)
 	productRepo := product.NewProductRepository(db)
 	userRepo := user.NewUserRepository(db)
-	service := NewOrderService(orderRepo, orderItemRepo, productRepo, userRepo)
+	cartRepo := cart.NewCartRepository(db)
+	service := NewOrderService(orderRepo, orderItemRepo, productRepo, userRepo, cartRepo)
 	controller := NewOrderController(service)
 
 	return &Module{

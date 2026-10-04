@@ -15,6 +15,7 @@ type ProductRepository interface {
 	Delete(ctx context.Context, id uint) error
 	Count(ctx context.Context) (int64, error)
 	GetByIDWithDeleted(ctx context.Context, id uint) (*Product, error)
+	DecreaseStock(ctx context.Context, tx *gorm.DB, productID uint, quantity int) error
 }
 type productRepository struct {
 	db *gorm.DB
@@ -66,12 +67,10 @@ func (r *productRepository) GetWithFilters(ctx context.Context, filters ProductF
 	default:
 		query = query.Order("created_at DESC")
 	}
-
 	var products []Product
 	if err := query.Limit(filters.Limit).Offset(filters.Offset).Find(&products).Error; err != nil {
 		return nil, err
 	}
-
 	return products, nil
 }
 
@@ -101,4 +100,16 @@ func (r *productRepository) GetByIDWithDeleted(ctx context.Context, id uint) (*P
 		return nil, err
 	}
 	return &product, nil
+}
+func (r *productRepository) DecreaseStock(
+	ctx context.Context,
+	tx *gorm.DB,
+	productID uint,
+	quantity int,
+) error {
+
+	return tx.WithContext(ctx).
+		Model(&Product{}).
+		Where("id = ?", productID).
+		Update("stock", gorm.Expr("stock - ?", quantity)).Error
 }

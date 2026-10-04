@@ -2,7 +2,7 @@ package cart
 
 import (
 	"context"
-	"ecommerce-backend/config"
+	appError "ecommerce-backend/errors"
 	"ecommerce-backend/internal/module/product"
 	"errors"
 	"time"
@@ -10,64 +10,63 @@ import (
 	"gorm.io/gorm"
 )
 
+type CartService interface {
+	AddToCart(parent context.Context, userID uint, req AddToCartRequest) (*CartItemResponse, error)
+	GetUserCart(parent context.Context, userID uint) (*CartResponse, error)
+	UpdateCartQuantity(parent context.Context, userID uint, cartID uint, quantity int) error
+	RemoveFromCart(parent context.Context, userID uint, cartID uint) error
+	ClearCart(parent context.Context, userID uint) error
+}
+
 // CartService handles cart business logic
-type CartService struct {
+type cartService struct {
 	cartRepo    CartRepository
 	productRepo product.ProductRepository
 }
 
 // NewCartService creates a new cart service instance
-func NewCartService(cartRepo CartRepository, productRepo product.ProductRepository) *CartService {
-	return &CartService{
+func NewCartService(cartRepo CartRepository, productRepo product.ProductRepository) CartService {
+	return &cartService{
 		cartRepo:    cartRepo,
 		productRepo: productRepo,
 	}
 }
 
-// AddToCart adds an item to the user's cart or updates quantity if exists
-func (s *CartService) AddToCart(parent context.Context, userID uint, req AddToCartRequest) (*CartItemResponse, error) {
+func (s *cartService) AddToCart(parent context.Context, userID uint, req AddToCartRequest) (*CartItemResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-
-	// Validate product exists and has stock
 	product, err := s.productRepo.GetByID(ctx, req.ProductID)
 	if err != nil {
-		return nil, errors.New("product not found")
+		return nil, appError.ErrProductNotFound
 	}
 
 	if product.Stock < req.Quantity {
-		return nil, errors.New("insufficient stock")
+		return nil, appError.ErrInsufficientStock
 	}
-
-	// Check if item already in cart
-	// We need to modify the cart repository to support getting by user and product
-	// For now, we'll work with the database directly
-	var cartItem Cart
-	err = config.DB.WithContext(ctx).Where("user_id = ? AND product_id = ?", userID, req.ProductID).
-		First(&cartItem).Error
+	cartItem, err := s.cartRepo.GetByProductID(ctx, userID, req.ProductID)
 
 	if err == nil {
 		// Item exists, update quantity
 		newQuantity := cartItem.Quantity + req.Quantity
 		if product.Stock < newQuantity {
-			return nil, errors.New("insufficient stock")
+			return nil, appError.ErrInsufficientStock
 		}
 		cartItem.Quantity = newQuantity
-		if err := s.cartRepo.Update(ctx, &cartItem); err != nil {
-			return nil, errors.New("failed to update cart")
+		if err := s.cartRepo.Update(ctx, cartItem); err != nil {
+			return nil, appError.ErrUpdateCart
 		}
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// New item, create it
-		cartItem = Cart{
+		cartItem = &Cart{
 			UserID:    userID,
 			ProductID: req.ProductID,
 			Quantity:  req.Quantity,
 		}
-		if err := s.cartRepo.Create(ctx, &cartItem); err != nil {
-			return nil, errors.New("failed to add item to cart")
+		if err := s.cartRepo.Create(ctx, cartItem); err != nil {
+			return nil, appError.ErrFailedToAddCart
 		}
 	} else {
-		return nil, errors.New("failed to load cart")
+		return nil, appError.ErrFailedToLoadCart
 	}
 
 	return &CartItemResponse{
@@ -82,87 +81,94 @@ func (s *CartService) AddToCart(parent context.Context, userID uint, req AddToCa
 	}, nil
 }
 
-// GetUserCart retrieves all cart items for a user
-func (s *CartService) GetUserCart(parent context.Context, userID uint) ([]Cart, float64, error) {
+// get the user cart
+func (s *cartService) GetUserCart(parent context.Context, userID uint) (*CartResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-
-	// Get all cart items for user
-	var cartItems []Cart
-	if err := config.DB.WithContext(ctx).Preload("Product").
-		Where("user_id = ?", userID).
-		Find(&cartItems).Error; err != nil {
-		return nil, 0, errors.New("failed to load cart")
+	cartItems, err := s.cartRepo.GetUserCart(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Calculate total
 	total := 0.0
+	items := make([]CartItemResponse, 0, len(cartItems))
 	for _, item := range cartItems {
 		total += float64(item.Quantity) * item.Product.Price
+		items = append(items, CartItemResponse{
+			ID:       item.ID,
+			Quantity: item.Quantity,
+			Product: CartProductResponse{
+				ID:       item.Product.ID,
+				Name:     item.Product.Name,
+				Price:    item.Product.Price,
+				ImageURL: item.Product.ImageURL,
+			},
+		})
 	}
+	response := &CartResponse{
+		CartItems: items,
+		Total:     total,
+	}
+	return response, nil
 
-	return cartItems, total, nil
 }
 
 // UpdateCartQuantity updates the quantity of an item in cart
-func (s *CartService) UpdateCartQuantity(parent context.Context, userID uint, cartID uint, quantity int) error {
+func (s *cartService) UpdateCartQuantity(parent context.Context, userID uint, cartID uint, quantity int) error {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-
-	var cartItem Cart
-	if err := config.DB.WithContext(ctx).First(&cartItem, cartID).Error; err != nil {
-		return errors.New("cart item not found")
+	cartItem, err := s.cartRepo.FindCartByCartID(ctx, cartID)
+	if err != nil {
+		return appError.ErrCartNotFound
 	}
-
 	if cartItem.UserID != userID {
-		return errors.New("unauthorized")
+		return appError.ErrForbidden
 	}
 
 	if quantity <= 0 {
-		return errors.New("quantity must be greater than 0")
+		return appError.ErrQuantityValidation
 	}
 
 	// Check stock
 	product, err := s.productRepo.GetByID(ctx, cartItem.ProductID)
 	if err != nil {
-		return errors.New("product not found")
+		return appError.ErrProductNotFound
 	}
 
 	if product.Stock < quantity {
-		return errors.New("insufficient stock")
+		return appError.ErrInsufficientStock
 	}
 
 	cartItem.Quantity = quantity
-	if err := s.cartRepo.Update(ctx, &cartItem); err != nil {
-		return errors.New("failed to update cart")
+	if err := s.cartRepo.Update(ctx, cartItem); err != nil {
+		return appError.ErrUpdateCart
 	}
 
 	return nil
 }
 
 // RemoveFromCart removes an item from the user's cart
-func (s *CartService) RemoveFromCart(parent context.Context, userID uint, cartID uint) error {
+func (s *cartService) RemoveFromCart(parent context.Context, userID uint, cartID uint) error {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-
-	var cartItem Cart
-	if err := config.DB.WithContext(ctx).First(&cartItem, cartID).Error; err != nil {
-		return errors.New("cart item not found")
+	cartItem, err := s.cartRepo.FindCartByCartID(ctx, cartID)
+	if err != nil {
+		return appError.ErrCartNotFound
 	}
-
 	if cartItem.UserID != userID {
-		return errors.New("unauthorized")
+		return appError.ErrForbidden
 	}
 
 	if err := s.cartRepo.Delete(ctx, cartID); err != nil {
-		return errors.New("failed to remove item from cart")
+		return appError.ErrRemoveCartItem
 	}
 
 	return nil
 }
 
 // ClearCart removes all items from user's cart
-func (s *CartService) ClearCart(parent context.Context, userID uint) error {
+func (s *cartService) ClearCart(parent context.Context, userID uint) error {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	return s.cartRepo.DeleteByUserID(ctx, userID)

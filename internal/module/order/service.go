@@ -3,76 +3,68 @@ package order
 import (
 	"context"
 	"ecommerce-backend/config"
+	appError "ecommerce-backend/errors"
 	"ecommerce-backend/internal/module/cart"
 	"ecommerce-backend/internal/module/product"
 	"ecommerce-backend/internal/module/user"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
-// OrderService handles order business logic
-type OrderService struct {
+type OrderService interface {
+	CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*Order, error)
+	CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (map[string]interface{}, error)
+	GetUserOrders(parent context.Context, userID uint) ([]Order, error)
+	GetAllOrders(parent context.Context) ([]Order, error)
+	ArchiveOrder(parent context.Context, userID uint, orderID uint) error
+}
+type orderService struct {
 	orderRepo     OrderRepository
 	orderItemRepo OrderItemRepository
 	productRepo   product.ProductRepository
 	userRepo      user.UserRepository
+	cartRepo      cart.CartRepository
 }
 
-// NewOrderService creates a new order service instance
 func NewOrderService(
 	orderRepo OrderRepository,
 	orderItemRepo OrderItemRepository,
 	productRepo product.ProductRepository,
 	userRepo user.UserRepository,
-) *OrderService {
-	return &OrderService{
+	cartRepo cart.CartRepository,
+) OrderService {
+	return &orderService{
 		orderRepo:     orderRepo,
 		orderItemRepo: orderItemRepo,
 		productRepo:   productRepo,
 		userRepo:      userRepo,
+		cartRepo:      cartRepo,
 	}
 }
 
 // CreateCashOnDeliveryOrder creates an order with COD payment
 
-func (s *OrderService) CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*Order, error) {
+func (s *orderService) CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*Order, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
-	// Start transaction
-	tx := config.DB.WithContext(ctx).Begin()
+	tx := s.orderRepo.TransactionDB(ctx)
 	if tx.Error != nil {
-		return nil, errors.New("failed to start transaction")
-	}
-
-	order := Order{
-		UserID:        userID,
-		CustomerName:  req.CustomerName,
-		Phone:         req.Phone,
-		AddressLine:   req.AddressLine,
-		City:          req.City,
-		Area:          req.Area,
-		PostalCode:    req.PostalCode,
-		Notes:         req.Notes,
-		PaymentMethod: "Cash on Delivery",
-		PaymentStatus: "Pending",
-		Status:        "Pending",
-		Currency:      "BDT",
+		return nil, appError.ErrFailedToStartTransaction
 	}
 
 	// Get cart items
-	var cartItems []cart.Cart
-	if err := tx.Preload("Product").Where("user_id = ?", userID).Find(&cartItems).Error; err != nil {
+	cartItems, err := s.cartRepo.GetUserCarts(ctx, tx, userID)
+	if err != nil {
 		tx.Rollback()
-		return nil, errors.New("failed to load cart")
+		return nil, appError.ErrFailedToLoadCart
 	}
 
 	if len(cartItems) == 0 {
 		tx.Rollback()
-		return nil, errors.New("cart is empty")
+		return nil, appError.ErrCartEmpty
 	}
 
 	// Calculate total and create order items
@@ -83,7 +75,7 @@ func (s *OrderService) CreateCashOnDeliveryOrder(parent context.Context, userID 
 		// Check stock
 		if cartItem.Product.Stock < cartItem.Quantity {
 			tx.Rollback()
-			return nil, errors.New("insufficient stock for " + cartItem.Product.Name)
+			return nil, fmt.Errorf("%w for %s", appError.ErrInsufficientStock, cartItem.Product.Name)
 		}
 
 		price := cartItem.Product.Price * float64(cartItem.Quantity)
@@ -96,46 +88,72 @@ func (s *OrderService) CreateCashOnDeliveryOrder(parent context.Context, userID 
 		})
 
 		// Update product stock
-		if err := tx.Model(&cartItem.Product).
-			Update("stock", gorm.Expr("stock - ?", cartItem.Quantity)).Error; err != nil {
+		if err := s.productRepo.DecreaseStock(
+			ctx,
+			tx,
+			cartItem.ProductID,
+			cartItem.Quantity,
+		); err != nil {
 			tx.Rollback()
-			return nil, errors.New("failed to update product stock")
+			return nil, appError.ErrFailedToUpdateStock
 		}
 	}
-
-	order.TotalPrice = totalPrice
-
-	// Create order
-	if err := tx.Create(&order).Error; err != nil {
-		tx.Rollback()
-		return nil, errors.New("failed to create order")
+	order := Order{
+		UserID:        userID,
+		CustomerName:  req.CustomerName,
+		Phone:         req.Phone,
+		AddressLine:   req.AddressLine,
+		City:          req.City,
+		Area:          req.Area,
+		PostalCode:    req.PostalCode,
+		Notes:         req.Notes,
+		PaymentMethod: "cod",
+		PaymentStatus: "Pending",
+		Status:        "Pending",
+		Currency:      "BDT",
+		TotalPrice:    totalPrice,
 	}
 
+	// Create order
+	if err := s.orderRepo.Create(ctx, tx, &order); err != nil {
+		tx.Rollback()
+		return nil, appError.ErrFailedToCreateOrder
+	}
 	// Create order items
 	for i := range orderItems {
 		orderItems[i].OrderID = order.ID
-		if err := tx.Create(&orderItems[i]).Error; err != nil {
-			tx.Rollback()
-			return nil, errors.New("failed to create order items")
-		}
+	}
+	if err := s.orderItemRepo.CreateMany(
+		ctx,
+		tx,
+		orderItems,
+	); err != nil {
+		tx.Rollback()
+
+		return nil, appError.ErrFailedToCreateOrderItems
 	}
 
 	// Clear cart
-	if err := tx.Where("user_id = ?", userID).Delete(&cart.Cart{}).Error; err != nil {
+	if err := s.cartRepo.ClearCart(
+		ctx,
+		tx,
+		userID,
+	); err != nil {
+
 		tx.Rollback()
-		return nil, errors.New("failed to clear cart")
+
+		return nil, appError.ErrFailedToClearCart
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		tx.Rollback()
-		return nil, errors.New("transaction failed")
+		return nil, appError.ErrTransactionFailed
 	}
 
 	return &order, nil
 }
 
 // CreateSSLCommerzOrder creates an order with SSLCommerz payment
-func (s *OrderService) CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (map[string]interface{}, error) {
+func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (map[string]interface{}, error) {
 	if !SSLCommerzEnabled() {
 		return nil, errors.New("sslcommerz is not configured")
 	}
@@ -245,7 +263,7 @@ func (s *OrderService) CreateSSLCommerzOrder(parent context.Context, userID uint
 }
 
 // GetUserOrders retrieves all orders for a user
-func (s *OrderService) GetUserOrders(parent context.Context, userID uint) ([]Order, error) {
+func (s *orderService) GetUserOrders(parent context.Context, userID uint) ([]Order, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
@@ -258,7 +276,7 @@ func (s *OrderService) GetUserOrders(parent context.Context, userID uint) ([]Ord
 }
 
 // GetAllOrders retrieves all orders (admin only)
-func (s *OrderService) GetAllOrders(parent context.Context) ([]Order, error) {
+func (s *orderService) GetAllOrders(parent context.Context) ([]Order, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
@@ -271,7 +289,7 @@ func (s *OrderService) GetAllOrders(parent context.Context) ([]Order, error) {
 }
 
 // ArchiveOrder archives an order
-func (s *OrderService) ArchiveOrder(parent context.Context, userID uint, orderID uint) error {
+func (s *orderService) ArchiveOrder(parent context.Context, userID uint, orderID uint) error {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
@@ -288,8 +306,7 @@ func (s *OrderService) ArchiveOrder(parent context.Context, userID uint, orderID
 	return s.orderRepo.Update(ctx, order)
 }
 
-// NormalizeOrderRequest normalizes order request data
-func (s *OrderService) NormalizeOrderRequest(req *CreateOrderRequest) {
+func NormalizeOrderRequest(req *CreateOrderRequest) {
 	req.CustomerName = strings.TrimSpace(req.CustomerName)
 	req.Phone = strings.TrimSpace(req.Phone)
 	req.AddressLine = strings.TrimSpace(req.AddressLine)
@@ -299,8 +316,7 @@ func (s *OrderService) NormalizeOrderRequest(req *CreateOrderRequest) {
 	req.Notes = strings.TrimSpace(req.Notes)
 }
 
-// ValidateOrderRequest validates order request data
-func (s *OrderService) ValidateOrderRequest(req CreateOrderRequest) error {
+func ValidateOrderRequest(req CreateOrderRequest) error {
 	if req.CustomerName == "" {
 		return errors.New("customer name is required")
 	}
@@ -313,8 +329,8 @@ func (s *OrderService) ValidateOrderRequest(req CreateOrderRequest) error {
 	if req.City == "" {
 		return errors.New("city is required")
 	}
-	if req.PostalCode == "" {
-		return errors.New("postal code is required")
+	if req.Area == "" {
+		return errors.New("area is required")
 	}
 	return nil
 }
