@@ -2,6 +2,7 @@ package product
 
 import (
 	"context"
+	appError "ecommerce-backend/errors"
 
 	"gorm.io/gorm"
 )
@@ -107,9 +108,18 @@ func (r *productRepository) DecreaseStock(
 	productID uint,
 	quantity int,
 ) error {
-
-	return tx.WithContext(ctx).
+	result := tx.WithContext(ctx).
 		Model(&Product{}).
-		Where("id = ?", productID).
-		Update("stock", gorm.Expr("stock - ?", quantity)).Error
+		Where("id = ? AND stock >= ?", productID, quantity).
+		Update("stock", gorm.Expr("stock - ?", quantity))
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return appError.ErrInsufficientStock
+	}
+
+	return nil
 }

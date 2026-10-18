@@ -45,11 +45,19 @@ func main() {
 	cartModule := cart.NewModule(config.DB)
 	orderModule := order.NewModule(config.DB)
 	r := gin.Default()
+
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     frontendOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
+		AllowOriginFunc: func(origin string) bool {
+			log.Printf("CORS origin: %q", origin)
+
+			return origin == "http://localhost:3000" ||
+				origin == "http://192.168.0.109:3000" ||
+				origin == "null"
+		},
 	}))
 
 	r.NoRoute(func(c *gin.Context) {

@@ -1,7 +1,10 @@
 package order
 
 import (
+	"ecommerce-backend/config"
+	appError "ecommerce-backend/errors"
 	"ecommerce-backend/utils"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,16 +36,54 @@ func (c *OrderController) CreateOrder(ctx *gin.Context) {
 
 	switch strings.ToLower(req.PaymentMethod) {
 	case "cod":
-		createdOrder, err := c.service.CreateCashOnDeliveryOrder(ctx.Request.Context(), userID, req)
+		response, err := c.service.CreateCashOnDeliveryOrder(ctx.Request.Context(), userID, req)
 		if err != nil {
-			utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+			switch {
+			case errors.Is(err, appError.ErrCartEmpty):
+				utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+
+			case errors.Is(err, appError.ErrInsufficientStock):
+				utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+
+			case errors.Is(err, appError.ErrFailedToCreateOrder),
+				errors.Is(err, appError.ErrFailedToCreateOrderItems),
+				errors.Is(err, appError.ErrFailedToUpdateStock),
+				errors.Is(err, appError.ErrFailedToClearCart),
+				errors.Is(err, appError.ErrTransactionFailed):
+				utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
+
+			default:
+				utils.RespondError(ctx, http.StatusInternalServerError, "Failed to place order")
+			}
+
 			return
 		}
-		utils.RespondSuccess(ctx, http.StatusCreated, "Order placed successfully", gin.H{"order_id": createdOrder.ID, "total_paid": createdOrder.TotalPrice, "status": createdOrder.Status, "payment_method": req.PaymentMethod})
+		utils.RespondSuccess(ctx, http.StatusCreated, "Order placed successfully", response)
 	case "sslcommerz":
 		result, err := c.service.CreateSSLCommerzOrder(ctx.Request.Context(), userID, req)
 		if err != nil {
-			utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+			switch {
+			case errors.Is(err, appError.ErrSSLCommerzNotConfigured):
+				utils.RespondError(ctx, http.StatusServiceUnavailable, err.Error())
+			case errors.Is(err, appError.ErrCartEmpty):
+				utils.RespondError(ctx, http.StatusBadRequest, err.Error())
+			case errors.Is(err, appError.ErrInsufficientStock):
+				utils.RespondError(ctx, http.StatusConflict, err.Error())
+			case errors.Is(err, appError.ErrPaymentSessionUnknown):
+				utils.RespondError(ctx, http.StatusBadGateway, err.Error())
+			case errors.Is(err, appError.ErrPaymentSessionSaveFailed):
+				utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
+			case errors.Is(err, appError.ErrFailedToStartTransaction),
+				errors.Is(err, appError.ErrFailedToLoadCart),
+				errors.Is(err, appError.ErrFailedToCreateOrder),
+				errors.Is(err, appError.ErrFailedToCreateOrderItems),
+				errors.Is(err, appError.ErrFailedToUpdateStock),
+				errors.Is(err, appError.ErrFailedToClearCart),
+				errors.Is(err, appError.ErrTransactionFailed):
+				utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
+			default:
+				utils.RespondError(ctx, http.StatusInternalServerError, "Failed to create SSLCommerz order")
+			}
 			return
 		}
 		utils.RespondSuccess(ctx, http.StatusCreated, "Order created, proceed to payment", result)
@@ -96,8 +137,73 @@ func (c *OrderController) ArchiveOrder(ctx *gin.Context) {
 	}
 	utils.RespondSuccess(ctx, http.StatusOK, "Order archived", nil)
 }
+func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) {
+	// Parse callback data from either POST form or GET query.
+	if err := ctx.Request.ParseForm(); err != nil {
+		utils.RespondError(
+			ctx,
+			http.StatusBadRequest,
+			"Failed to parse payment callback",
+		)
+		return
+	}
 
-func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) { SSLCommerzSuccess(ctx) }
-func (c *OrderController) SSLCommerzFail(ctx *gin.Context)    { SSLCommerzFail(ctx) }
-func (c *OrderController) SSLCommerzCancel(ctx *gin.Context)  { SSLCommerzCancel(ctx) }
-func (c *OrderController) SSLCommerzIPN(ctx *gin.Context)     { SSLCommerzIPN(ctx) }
+	transactionID := strings.TrimSpace(ctx.Request.FormValue("tran_id"))
+	validationID := strings.TrimSpace(ctx.Request.FormValue("val_id"))
+
+	if transactionID == "" || validationID == "" {
+		utils.RespondError(
+			ctx,
+			http.StatusBadRequest,
+			appError.ErrMissingPaymentInformation.Error(),
+		)
+		return
+	}
+
+	err := c.service.CompleteSSLCommerzPayment(
+		ctx.Request.Context(),
+		transactionID,
+		validationID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, appError.ErrMissingPaymentInformation),
+			errors.Is(err, appError.ErrPaymentValidationFailed),
+			errors.Is(err, appError.ErrPaymentTransactionMismatch),
+			errors.Is(err, appError.ErrPaymentValidationIDMismatch),
+			errors.Is(err, appError.ErrPaymentAmountMismatch),
+			errors.Is(err, appError.ErrPaymentCurrencyMismatch),
+			errors.Is(err, appError.ErrInvalidPaymentMethod):
+
+			utils.RespondError(
+				ctx,
+				http.StatusBadRequest,
+				"Payment could not be verified",
+			)
+
+		case errors.Is(err, appError.ErrOrderNotFound):
+			utils.RespondError(
+				ctx,
+				http.StatusNotFound,
+				appError.ErrOrderNotFound.Error(),
+			)
+
+		default:
+			utils.RespondError(
+				ctx,
+				http.StatusInternalServerError,
+				"Failed to complete payment",
+			)
+		}
+		return
+	}
+
+	ctx.Redirect(
+		http.StatusSeeOther,
+		config.SSLCommerz.FrontendURL+"/payment/success",
+	)
+}
+
+func (c *OrderController) SSLCommerzFail(ctx *gin.Context)   { SSLCommerzFail(ctx) }
+func (c *OrderController) SSLCommerzCancel(ctx *gin.Context) { SSLCommerzCancel(ctx) }
+func (c *OrderController) SSLCommerzIPN(ctx *gin.Context)    { SSLCommerzIPN(ctx) }

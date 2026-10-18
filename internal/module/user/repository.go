@@ -25,6 +25,9 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 func (r *userRepository) GetByID(ctx context.Context, id uint) (*User, error) {
 	var user User
 	if err := r.db.WithContext(ctx).First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.ErrUserNotFound
+		}
 		return nil, err
 	}
 	return &user, nil

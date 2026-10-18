@@ -2,16 +2,25 @@ package order
 
 import (
 	"context"
+	appError "ecommerce-backend/errors"
+	"errors"
 
 	"gorm.io/gorm"
 )
 
 type OrderRepository interface {
 	GetByID(ctx context.Context, id uint) (*Order, error)
+	GetByTransactionID(ctx context.Context, transactionID string) (*Order, error)
 	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
 	GetAll(ctx context.Context) ([]Order, error)
 	Create(ctx context.Context, tx *gorm.DB, order *Order) error
 	Update(ctx context.Context, order *Order) error
+	UpdatePaymentSession(
+		ctx context.Context,
+		orderID uint,
+		status string,
+		paymentURL string,
+	) error
 	Delete(ctx context.Context, id uint) error
 	TransactionDB(ctx context.Context) *gorm.DB
 }
@@ -31,6 +40,23 @@ func (r *orderRepository) GetByID(ctx context.Context, id uint) (*Order, error) 
 	if err := r.db.WithContext(ctx).Preload("Items").Preload("User").First(&order, id).Error; err != nil {
 		return nil, err
 	}
+	return &order, nil
+}
+func (r *orderRepository) GetByTransactionID(
+	ctx context.Context,
+	transactionID string,
+) (*Order, error) {
+	var order Order
+
+	if err := r.db.WithContext(ctx).
+		Where("transaction_id = ?", transactionID).
+		First(&order).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.ErrOrderNotFound
+		}
+		return nil, err
+	}
+
 	return &order, nil
 }
 
@@ -60,6 +86,44 @@ func (r *orderRepository) Create(
 
 func (r *orderRepository) Update(ctx context.Context, order *Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
+}
+
+func (r *orderRepository) UpdatePaymentSession(
+	ctx context.Context,
+	orderID uint,
+	status string,
+	paymentURL string,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&Order{}).
+		Where("id = ?", orderID).
+		Updates(map[string]interface{}{
+			"payment_session_status": status,
+			"payment_url":            paymentURL,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		var count int64
+
+		err := r.db.WithContext(ctx).
+			Model(&Order{}).
+			Where("id = ?", orderID).
+			Count(&count).Error
+
+		if err != nil {
+			return err
+		}
+
+		if count == 0 {
+			return gorm.ErrRecordNotFound
+		}
+	}
+
+	return nil
 }
 
 func (r *orderRepository) Delete(ctx context.Context, id uint) error {

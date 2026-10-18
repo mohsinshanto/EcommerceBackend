@@ -3,8 +3,10 @@ package order
 import (
 	"context"
 	"ecommerce-backend/config"
+	appError "ecommerce-backend/errors"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,7 +37,6 @@ type SSLCommerzSessionResponse struct {
 	FailedReason   string `json:"failedreason"`
 	SessionKey     string `json:"sessionkey"`
 	GatewayPageURL string `json:"GatewayPageURL"`
-	StoreLogo      string `json:"storeLogo"`
 }
 
 type SSLCommerzValidationResponse struct {
@@ -56,9 +57,9 @@ func SSLCommerzEnabled() bool {
 	return config.SSLCommerz != nil
 }
 
-func CreateSSLCommerzSession(ctx context.Context, req SSLCommerzSessionRequest) (SSLCommerzSessionResponse, error) {
+func CreateSSLCommerzSession(ctx context.Context, req SSLCommerzSessionRequest) (*SSLCommerzSessionResponse, error) {
 	if config.SSLCommerz == nil {
-		return SSLCommerzSessionResponse{}, fmt.Errorf("sslcommerz is not configured")
+		return &SSLCommerzSessionResponse{}, fmt.Errorf("sslcommerz is not configured")
 	}
 
 	form := url.Values{}
@@ -93,36 +94,34 @@ func CreateSSLCommerzSession(ctx context.Context, req SSLCommerzSessionRequest) 
 		strings.NewReader(form.Encode()),
 	)
 	if err != nil {
-		return SSLCommerzSessionResponse{}, err
+		return &SSLCommerzSessionResponse{}, err
 	}
 
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return SSLCommerzSessionResponse{}, err
+		return &SSLCommerzSessionResponse{}, err
 	}
 	defer resp.Body.Close()
-
 	var response SSLCommerzSessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return SSLCommerzSessionResponse{}, err
+		return &SSLCommerzSessionResponse{}, err
 	}
-
 	if response.GatewayPageURL == "" {
 		reason := strings.TrimSpace(response.FailedReason)
 		if reason == "" {
 			reason = "gateway session could not be created"
 		}
-		return SSLCommerzSessionResponse{}, fmt.Errorf("%s", reason)
+		return &SSLCommerzSessionResponse{}, fmt.Errorf("%s", reason)
 	}
 
-	return response, nil
+	return &response, nil
 }
 
-func ValidateSSLCommerzPayment(ctx context.Context, validationID string) (SSLCommerzValidationResponse, error) {
+func ValidateSSLCommerzPayment(ctx context.Context, validationID string) (*SSLCommerzValidationResponse, error) {
 	if config.SSLCommerz == nil {
-		return SSLCommerzValidationResponse{}, fmt.Errorf("sslcommerz is not configured")
+		return &SSLCommerzValidationResponse{}, appError.ErrSSLCommerzNotConfigured
 	}
 
 	query := url.Values{}
@@ -138,21 +137,21 @@ func ValidateSSLCommerzPayment(ctx context.Context, validationID string) (SSLCom
 		nil,
 	)
 	if err != nil {
-		return SSLCommerzValidationResponse{}, err
+		return &SSLCommerzValidationResponse{}, err
 	}
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return SSLCommerzValidationResponse{}, err
+		return &SSLCommerzValidationResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	var response SSLCommerzValidationResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return SSLCommerzValidationResponse{}, err
+		return &SSLCommerzValidationResponse{}, err
 	}
 
-	return response, nil
+	return &response, nil
 }
 
 func GetSSLCommerzPaymentURL(data map[string]interface{}) string {
@@ -169,7 +168,19 @@ func GetSSLCommerzPaymentURL(data map[string]interface{}) string {
 }
 
 func SSLCommerzSuccess(c *gin.Context) {
-	c.String(http.StatusOK, "SSLCommerz payment success callback received")
+	log.Printf("RemoteAddr: %q", c.Request.RemoteAddr)
+	log.Printf("Origin: %q", c.GetHeader("Origin"))
+	log.Printf("Referer: %q", c.GetHeader("Referer"))
+	log.Printf("User-Agent: %q", c.GetHeader("User-Agent"))
+	log.Printf("Host: %q", c.Request.Host)
+	if err := c.Request.ParseForm(); err != nil {
+		c.String(http.StatusBadRequest, "Failed to parse callback form")
+		return
+	}
+
+	log.Printf("Callback form data: %+v", c.Request.PostForm)
+
+	c.String(http.StatusOK, "Callback received")
 }
 
 func SSLCommerzFail(c *gin.Context) {

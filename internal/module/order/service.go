@@ -2,20 +2,24 @@ package order
 
 import (
 	"context"
-	"ecommerce-backend/config"
 	appError "ecommerce-backend/errors"
 	"ecommerce-backend/internal/module/cart"
 	"ecommerce-backend/internal/module/product"
 	"ecommerce-backend/internal/module/user"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type OrderService interface {
-	CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*Order, error)
-	CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (map[string]interface{}, error)
+	CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error)
+	CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error)
+	CompleteSSLCommerzPayment(parent context.Context, transactionID string, validationID string) error
 	GetUserOrders(parent context.Context, userID uint) ([]Order, error)
 	GetAllOrders(parent context.Context) ([]Order, error)
 	ArchiveOrder(parent context.Context, userID uint, orderID uint) error
@@ -46,7 +50,7 @@ func NewOrderService(
 
 // CreateCashOnDeliveryOrder creates an order with COD payment
 
-func (s *orderService) CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*Order, error) {
+func (s *orderService) CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
@@ -148,14 +152,21 @@ func (s *orderService) CreateCashOnDeliveryOrder(parent context.Context, userID 
 	if err := tx.Commit().Error; err != nil {
 		return nil, appError.ErrTransactionFailed
 	}
+	response := OrderResponse{
+		ID:            order.ID,
+		TotalPrice:    order.TotalPrice,
+		PaymentMethod: order.PaymentMethod,
+		Status:        order.Status,
+	}
 
-	return &order, nil
+	return &response, nil
+
 }
 
 // CreateSSLCommerzOrder creates an order with SSLCommerz payment
-func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (map[string]interface{}, error) {
+func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error) {
 	if !SSLCommerzEnabled() {
-		return nil, errors.New("sslcommerz is not configured")
+		return nil, appError.ErrSSLCommerzNotConfigured
 	}
 
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
@@ -164,17 +175,62 @@ func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint
 	// Get user
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("user not found")
+		return nil, err
 	}
 
 	// Start transaction
-	tx := config.DB.WithContext(ctx).Begin()
+	tx := s.orderRepo.TransactionDB(ctx)
 	if tx.Error != nil {
-		return nil, errors.New("failed to start transaction")
+		return nil, appError.ErrFailedToStartTransaction
 	}
 
+	// Get cart items
+	cartItems, err := s.cartRepo.GetUserCarts(ctx, tx, userID)
+	if err != nil {
+		tx.Rollback()
+		return nil, appError.ErrFailedToLoadCart
+	}
+
+	if len(cartItems) == 0 {
+		tx.Rollback()
+		return nil, appError.ErrCartEmpty
+	}
+
+	// Calculate total
+	totalPrice := 0.0
+	orderItems := make([]OrderItem, 0, len(cartItems))
+
+	for _, cartItem := range cartItems {
+		// Check stock
+		if cartItem.Product.Stock < cartItem.Quantity {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w for %s", appError.ErrInsufficientStock, cartItem.Product.Name)
+		}
+
+		price := cartItem.Product.Price * float64(cartItem.Quantity)
+		totalPrice += price
+
+		orderItems = append(orderItems, OrderItem{
+			ProductID: cartItem.ProductID,
+			Quantity:  cartItem.Quantity,
+			Price:     cartItem.Product.Price,
+		})
+
+		// Update product stock
+		if err := s.productRepo.DecreaseStock(
+			ctx,
+			tx,
+			cartItem.ProductID,
+			cartItem.Quantity,
+		); err != nil {
+			tx.Rollback()
+			return nil, appError.ErrFailedToUpdateStock
+		}
+	}
+	transactionID := "TRX-" + uuid.NewString()
 	order := Order{
 		UserID:        userID,
+		TransactionID: transactionID,
 		CustomerName:  req.CustomerName,
 		Phone:         req.Phone,
 		AddressLine:   req.AddressLine,
@@ -182,58 +238,49 @@ func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint
 		Area:          req.Area,
 		PostalCode:    req.PostalCode,
 		Notes:         req.Notes,
-		PaymentMethod: "SSLCommerz",
+		PaymentMethod: "sslcommerz",
 		PaymentStatus: "Pending",
 		Status:        "Pending",
 		Currency:      "BDT",
+		TotalPrice:    totalPrice,
 	}
-
-	// Get cart items
-	var cartItems []cart.Cart
-	if err := tx.Preload("Product").Where("user_id = ?", userID).Find(&cartItems).Error; err != nil {
-		tx.Rollback()
-		return nil, errors.New("failed to load cart")
-	}
-
-	if len(cartItems) == 0 {
-		tx.Rollback()
-		return nil, errors.New("cart is empty")
-	}
-
-	// Calculate total
-	totalPrice := 0.0
-	for _, item := range cartItems {
-		totalPrice += item.Product.Price * float64(item.Quantity)
-	}
-
-	order.TotalPrice = totalPrice
 
 	// Create order
-	if err := tx.Create(&order).Error; err != nil {
+	if err := s.orderRepo.Create(ctx, tx, &order); err != nil {
 		tx.Rollback()
-		return nil, errors.New("failed to create order")
+		return nil, appError.ErrFailedToCreateOrder
 	}
 
 	// Create order items
-	for _, cartItem := range cartItems {
-		item := OrderItem{
-			OrderID:   order.ID,
-			ProductID: cartItem.ProductID,
-			Quantity:  cartItem.Quantity,
-			Price:     cartItem.Product.Price,
-		}
-		if err := tx.Create(&item).Error; err != nil {
-			tx.Rollback()
-			return nil, errors.New("failed to create order item")
-		}
+	for i := range orderItems {
+		orderItems[i].OrderID = order.ID
+	}
+	if err := s.orderItemRepo.CreateMany(
+		ctx,
+		tx,
+		orderItems,
+	); err != nil {
+		tx.Rollback()
+
+		return nil, appError.ErrFailedToCreateOrderItems
+	}
+
+	// Clear cart
+	if err := s.cartRepo.ClearCart(
+		ctx,
+		tx,
+		userID,
+	); err != nil {
+
+		tx.Rollback()
+
+		return nil, appError.ErrFailedToClearCart
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		tx.Rollback()
-		return nil, errors.New("transaction failed")
+		return nil, appError.ErrTransactionFailed
 	}
 
-	transactionID := "TRX-" + time.Now().Format("20060102150405")
 	session, err := CreateSSLCommerzSession(ctx, SSLCommerzSessionRequest{
 		TransactionID: transactionID,
 		Amount:        order.TotalPrice,
@@ -249,17 +296,165 @@ func (s *orderService) CreateSSLCommerzOrder(parent context.Context, userID uint
 		Area:          req.Area,
 		PostalCode:    req.PostalCode,
 	})
+	// Use a separate timeout for saving the recovery status.
+	// The original ctx may have expired during the gateway request.
+	recoveryCtx, recoveryCancel := context.WithTimeout(
+		context.WithoutCancel(parent),
+		3*time.Second,
+	)
+	defer recoveryCancel()
+
 	if err != nil {
-		return nil, err
+		// We cannot assume the gateway failed to create the session.
+		// A timeout may mean that the result is unknown.
+		updateErr := s.orderRepo.UpdatePaymentSession(
+			recoveryCtx,
+			order.ID,
+			"unknown",
+			"",
+		)
+
+		if updateErr != nil {
+			return nil, fmt.Errorf(
+				"%w payment session result unknown: %v; failed to save recovery status: %w",
+				appError.ErrPaymentSessionUnknown,
+				err,
+				updateErr,
+			)
+		}
+
+		return nil, fmt.Errorf(
+			"%w payment session result unknown for order %d: %w",
+			appError.ErrPaymentSessionUnknown,
+			order.ID,
+			err,
+		)
 	}
 
-	return map[string]interface{}{
-		"order_id":       order.ID,
-		"transaction_id": transactionID,
-		"total_amount":   order.TotalPrice,
-		"payment_url":    session.GatewayPageURL,
-		"payment_method": "sslcommerz",
+	// Gateway returned a session URL.
+	// Save it before returning the URL to the frontend.
+	if err := s.orderRepo.UpdatePaymentSession(
+		recoveryCtx,
+		order.ID,
+		"ready",
+		session.GatewayPageURL,
+	); err != nil {
+		return nil, fmt.Errorf(
+			"%w payment session created but failed to save session details for order %d: %w",
+			appError.ErrPaymentSessionSaveFailed,
+			order.ID,
+			err,
+		)
+	}
+
+	return &OrderResponse{
+		ID:            order.ID,
+		TransactionID: transactionID,
+		TotalPrice:    order.TotalPrice,
+		PaymentURL:    session.GatewayPageURL,
+		PaymentMethod: "sslcommerz",
 	}, nil
+}
+
+// confirming payment
+func (s *orderService) CompleteSSLCommerzPayment(
+	parent context.Context,
+	transactionID string,
+	validationID string,
+) error {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+
+	transactionID = strings.TrimSpace(transactionID)
+	validationID = strings.TrimSpace(validationID)
+
+	if transactionID == "" || validationID == "" {
+		return appError.ErrMissingPaymentInformation
+	}
+
+	// Step 1: Validate payment with SSLCommerz.
+	validation, err := ValidateSSLCommerzPayment(ctx, validationID)
+	if err != nil {
+		return fmt.Errorf("validate SSLCommerz payment: %w", err)
+	}
+
+	if validation == nil {
+		return appError.ErrPaymentValidationFailed
+	}
+
+	// Step 2: Check validation status.
+	status := strings.ToUpper(strings.TrimSpace(validation.Status))
+	if status != "VALID" && status != "VALIDATED" {
+		return appError.ErrPaymentValidationFailed
+	}
+
+	// Step 3: Verify transaction IDs.
+	if strings.TrimSpace(validation.TransactionID) != transactionID {
+		return appError.ErrPaymentTransactionMismatch
+	}
+
+	if validation.ValidationID != "" &&
+		strings.TrimSpace(validation.ValidationID) != validationID {
+		return appError.ErrPaymentValidationIDMismatch
+	}
+
+	// Step 4: Find the order.
+	order, err := s.orderRepo.GetByTransactionID(ctx, transactionID)
+	if err != nil {
+		return fmt.Errorf("find order by transaction ID: %w", err)
+	}
+
+	if order == nil {
+		return appError.ErrOrderNotFound
+	}
+
+	if !strings.EqualFold(
+		strings.TrimSpace(order.PaymentMethod),
+		"sslcommerz",
+	) {
+		return appError.ErrInvalidPaymentMethod
+	}
+
+	// Step 5: Parse and verify the payment amount.
+	amount, err := strconv.ParseFloat(validation.Amount, 64)
+	if err != nil {
+		return fmt.Errorf("%w: %v", appError.ErrInvalidPaymentAmount, err)
+	}
+
+	if math.Abs(amount-order.TotalPrice) > 0.009 {
+		return appError.ErrPaymentAmountMismatch
+	}
+
+	// Step 6: Verify currency.
+	if !strings.EqualFold(
+		strings.TrimSpace(validation.Currency),
+		strings.TrimSpace(order.Currency),
+	) {
+		return appError.ErrPaymentCurrencyMismatch
+	}
+
+	// Step 7: Handle repeated callbacks.
+	if strings.EqualFold(
+		strings.TrimSpace(order.PaymentStatus),
+		"Paid",
+	) {
+		return nil
+	}
+
+	// Step 8: Update payment information.
+	order.PaymentStatus = "Paid"
+	order.ValidationID = validation.ValidationID
+	order.GatewayAmount = amount
+	order.Currency = validation.Currency
+	order.BankTranID = validation.BankTranID
+	order.CardType = validation.CardType
+	order.SessionKey = validation.SessionKey
+
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		return fmt.Errorf("%w: %v", appError.ErrFailedToUpdatePayment, err)
+	}
+
+	return nil
 }
 
 // GetUserOrders retrieves all orders for a user
