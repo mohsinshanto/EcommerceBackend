@@ -6,6 +6,7 @@ import (
 	"ecommerce-backend/utils"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -147,20 +148,10 @@ func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) {
 		)
 		return
 	}
+	transactionID := ctx.Request.FormValue("tran_id")
+	validationID := ctx.Request.FormValue("val_id")
 
-	transactionID := strings.TrimSpace(ctx.Request.FormValue("tran_id"))
-	validationID := strings.TrimSpace(ctx.Request.FormValue("val_id"))
-
-	if transactionID == "" || validationID == "" {
-		utils.RespondError(
-			ctx,
-			http.StatusBadRequest,
-			appError.ErrMissingPaymentInformation.Error(),
-		)
-		return
-	}
-
-	err := c.service.CompleteSSLCommerzPayment(
+	response, err := c.service.CompleteSSLCommerzPayment(
 		ctx.Request.Context(),
 		transactionID,
 		validationID,
@@ -171,6 +162,7 @@ func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) {
 			errors.Is(err, appError.ErrPaymentValidationFailed),
 			errors.Is(err, appError.ErrPaymentTransactionMismatch),
 			errors.Is(err, appError.ErrPaymentValidationIDMismatch),
+			errors.Is(err, appError.ErrInvalidPaymentAmount),
 			errors.Is(err, appError.ErrPaymentAmountMismatch),
 			errors.Is(err, appError.ErrPaymentCurrencyMismatch),
 			errors.Is(err, appError.ErrInvalidPaymentMethod):
@@ -188,6 +180,13 @@ func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) {
 				appError.ErrOrderNotFound.Error(),
 			)
 
+		case errors.Is(err, appError.ErrFailedToUpdatePayment):
+			utils.RespondError(
+				ctx,
+				http.StatusInternalServerError,
+				"Failed to update payment",
+			)
+
 		default:
 			utils.RespondError(
 				ctx,
@@ -197,13 +196,55 @@ func (c *OrderController) SSLCommerzSuccess(ctx *gin.Context) {
 		}
 		return
 	}
+	query := url.Values{}
+	query.Set("status", "success")
+	query.Set("transaction_id", response.TransactionID)
+	query.Set("order_id", strconv.FormatUint(uint64(response.OrderID), 10))
+	query.Set("message", "Payment verified successfully")
 
+	redirectURL := config.SSLCommerz.FrontendURL +
+		"/payment/result?" + query.Encode()
 	ctx.Redirect(
 		http.StatusSeeOther,
-		config.SSLCommerz.FrontendURL+"/payment/success",
+		redirectURL,
 	)
 }
 
-func (c *OrderController) SSLCommerzFail(ctx *gin.Context)   { SSLCommerzFail(ctx) }
-func (c *OrderController) SSLCommerzCancel(ctx *gin.Context) { SSLCommerzCancel(ctx) }
-func (c *OrderController) SSLCommerzIPN(ctx *gin.Context)    { SSLCommerzIPN(ctx) }
+func (c *OrderController) SSLCommerzFail(ctx *gin.Context) {
+	redirectURL := config.SSLCommerz.FrontendURL +
+		"/payment/result?status=failed&message=Payment+failed"
+
+	ctx.Redirect(http.StatusSeeOther, redirectURL)
+}
+func (c *OrderController) SSLCommerzCancel(ctx *gin.Context) {
+	redirectURL := config.SSLCommerz.FrontendURL +
+		"/payment/result?status=cancelled&message=Payment+cancelled"
+
+	ctx.Redirect(http.StatusSeeOther, redirectURL)
+}
+func (c *OrderController) SSLCommerzIPN(ctx *gin.Context) {
+	if err := ctx.Request.ParseForm(); err != nil {
+		ctx.Status(http.StatusBadRequest)
+		return
+	}
+
+	transactionID := strings.TrimSpace(ctx.Request.FormValue("tran_id"))
+	validationID := strings.TrimSpace(ctx.Request.FormValue("val_id"))
+
+	if transactionID == "" || validationID == "" {
+		ctx.Status(http.StatusBadRequest)
+		return
+	}
+
+	_, err := c.service.CompleteSSLCommerzPayment(
+		ctx.Request.Context(),
+		transactionID,
+		validationID,
+	)
+	if err != nil {
+		ctx.Status(http.StatusInternalServerError)
+		return
+	}
+
+	ctx.Status(http.StatusOK)
+}

@@ -56,6 +56,10 @@ type CreateOrderRequest struct {
 	Notes         string `json:"notes"`
 	PaymentMethod string `json:"payment_method" binding:"required,oneof=cod sslcommerz"`
 }
+type PaymentResult struct {
+	OrderID       uint
+	TransactionID string
+}
 
 func ToAdminOrderResponse(order Order) AdminOrderResponse {
 	items := make([]AdminOrderItemResponse, 0, len(order.Items))

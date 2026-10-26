@@ -19,7 +19,7 @@ import (
 type OrderService interface {
 	CreateCashOnDeliveryOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error)
 	CreateSSLCommerzOrder(parent context.Context, userID uint, req CreateOrderRequest) (*OrderResponse, error)
-	CompleteSSLCommerzPayment(parent context.Context, transactionID string, validationID string) error
+	CompleteSSLCommerzPayment(parent context.Context, transactionID string, validationID string) (*PaymentResult, error)
 	GetUserOrders(parent context.Context, userID uint) ([]Order, error)
 	GetAllOrders(parent context.Context) ([]Order, error)
 	ArchiveOrder(parent context.Context, userID uint, orderID uint) error
@@ -361,7 +361,7 @@ func (s *orderService) CompleteSSLCommerzPayment(
 	parent context.Context,
 	transactionID string,
 	validationID string,
-) error {
+) (*PaymentResult, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
@@ -369,60 +369,71 @@ func (s *orderService) CompleteSSLCommerzPayment(
 	validationID = strings.TrimSpace(validationID)
 
 	if transactionID == "" || validationID == "" {
-		return appError.ErrMissingPaymentInformation
+		return nil, appError.ErrMissingPaymentInformation
 	}
 
 	// Step 1: Validate payment with SSLCommerz.
 	validation, err := ValidateSSLCommerzPayment(ctx, validationID)
 	if err != nil {
-		return fmt.Errorf("validate SSLCommerz payment: %w", err)
+		return nil, fmt.Errorf("validate SSLCommerz payment: %w", err)
 	}
 
 	if validation == nil {
-		return appError.ErrPaymentValidationFailed
+		return nil, appError.ErrPaymentValidationFailed
 	}
 
 	// Step 2: Check validation status.
 	status := strings.ToUpper(strings.TrimSpace(validation.Status))
 	if status != "VALID" && status != "VALIDATED" {
-		return appError.ErrPaymentValidationFailed
+		return nil, appError.ErrPaymentValidationFailed
 	}
 
 	// Step 3: Verify transaction IDs.
 	if strings.TrimSpace(validation.TransactionID) != transactionID {
-		return appError.ErrPaymentTransactionMismatch
+		return nil, appError.ErrPaymentTransactionMismatch
 	}
 
-	if validation.ValidationID != "" &&
-		strings.TrimSpace(validation.ValidationID) != validationID {
-		return appError.ErrPaymentValidationIDMismatch
+	returnedValidationID := strings.TrimSpace(validation.ValidationID)
+	if returnedValidationID == "" ||
+		returnedValidationID != validationID {
+		return nil, appError.ErrPaymentValidationIDMismatch
 	}
 
 	// Step 4: Find the order.
 	order, err := s.orderRepo.GetByTransactionID(ctx, transactionID)
 	if err != nil {
-		return fmt.Errorf("find order by transaction ID: %w", err)
+		return nil, fmt.Errorf("find order by transaction ID: %w", err)
 	}
 
 	if order == nil {
-		return appError.ErrOrderNotFound
+		return nil, appError.ErrOrderNotFound
 	}
 
 	if !strings.EqualFold(
 		strings.TrimSpace(order.PaymentMethod),
 		"sslcommerz",
 	) {
-		return appError.ErrInvalidPaymentMethod
+		return nil, appError.ErrInvalidPaymentMethod
 	}
 
 	// Step 5: Parse and verify the payment amount.
 	amount, err := strconv.ParseFloat(validation.Amount, 64)
 	if err != nil {
-		return fmt.Errorf("%w: %v", appError.ErrInvalidPaymentAmount, err)
+		return nil, fmt.Errorf(
+			"%w: %v",
+			appError.ErrInvalidPaymentAmount,
+			err,
+		)
+	}
+
+	if math.IsNaN(amount) ||
+		math.IsInf(amount, 0) ||
+		amount < 0 {
+		return nil, appError.ErrInvalidPaymentAmount
 	}
 
 	if math.Abs(amount-order.TotalPrice) > 0.009 {
-		return appError.ErrPaymentAmountMismatch
+		return nil, appError.ErrPaymentAmountMismatch
 	}
 
 	// Step 6: Verify currency.
@@ -430,7 +441,7 @@ func (s *orderService) CompleteSSLCommerzPayment(
 		strings.TrimSpace(validation.Currency),
 		strings.TrimSpace(order.Currency),
 	) {
-		return appError.ErrPaymentCurrencyMismatch
+		return nil, appError.ErrPaymentCurrencyMismatch
 	}
 
 	// Step 7: Handle repeated callbacks.
@@ -438,23 +449,63 @@ func (s *orderService) CompleteSSLCommerzPayment(
 		strings.TrimSpace(order.PaymentStatus),
 		"Paid",
 	) {
-		return nil
+		return &PaymentResult{
+			OrderID:       order.ID,
+			TransactionID: order.TransactionID,
+		}, nil
 	}
 
-	// Step 8: Update payment information.
+	// Step 8: Prepare payment information.
 	order.PaymentStatus = "Paid"
-	order.ValidationID = validation.ValidationID
+	order.ValidationID = returnedValidationID
 	order.GatewayAmount = amount
 	order.Currency = validation.Currency
 	order.BankTranID = validation.BankTranID
 	order.CardType = validation.CardType
 	order.SessionKey = validation.SessionKey
 
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		return fmt.Errorf("%w: %v", appError.ErrFailedToUpdatePayment, err)
+	// Step 9: Atomically update payment if it is not already paid.
+	updated, err := s.orderRepo.UpdatePaymentIfUnpaid(ctx, order)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: %w",
+			appError.ErrFailedToUpdatePayment,
+			err,
+		)
 	}
 
-	return nil
+	// Step 10: If another callback updated the order first,
+	// reload it and verify that the payment is now paid.
+	if !updated {
+		latestOrder, err := s.orderRepo.GetByTransactionID(
+			ctx,
+			transactionID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"reload order after payment update: %w",
+				err,
+			)
+		}
+
+		if latestOrder == nil {
+			return nil, appError.ErrOrderNotFound
+		}
+
+		if !strings.EqualFold(
+			strings.TrimSpace(latestOrder.PaymentStatus),
+			"Paid",
+		) {
+			return nil, appError.ErrFailedToUpdatePayment
+		}
+
+		order = latestOrder
+	}
+
+	return &PaymentResult{
+		OrderID:       order.ID,
+		TransactionID: order.TransactionID,
+	}, nil
 }
 
 // GetUserOrders retrieves all orders for a user

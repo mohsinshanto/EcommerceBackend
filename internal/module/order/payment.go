@@ -6,14 +6,11 @@ import (
 	appError "ecommerce-backend/errors"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/gin-gonic/gin"
 )
 
 type SSLCommerzSessionRequest struct {
@@ -165,34 +162,6 @@ func GetSSLCommerzPaymentURL(data map[string]interface{}) string {
 		return config.SSLCommerz.FrontendURL + "/payment/result"
 	}
 	return "http://localhost:3000/payment/result"
-}
-
-func SSLCommerzSuccess(c *gin.Context) {
-	log.Printf("RemoteAddr: %q", c.Request.RemoteAddr)
-	log.Printf("Origin: %q", c.GetHeader("Origin"))
-	log.Printf("Referer: %q", c.GetHeader("Referer"))
-	log.Printf("User-Agent: %q", c.GetHeader("User-Agent"))
-	log.Printf("Host: %q", c.Request.Host)
-	if err := c.Request.ParseForm(); err != nil {
-		c.String(http.StatusBadRequest, "Failed to parse callback form")
-		return
-	}
-
-	log.Printf("Callback form data: %+v", c.Request.PostForm)
-
-	c.String(http.StatusOK, "Callback received")
-}
-
-func SSLCommerzFail(c *gin.Context) {
-	c.String(http.StatusOK, "SSLCommerz payment failed callback received")
-}
-
-func SSLCommerzCancel(c *gin.Context) {
-	c.String(http.StatusOK, "SSLCommerz payment cancelled callback received")
-}
-
-func SSLCommerzIPN(c *gin.Context) {
-	c.String(http.StatusOK, "SSLCommerz IPN received")
 }
 
 func GetEnv(key string, fallback string) string {

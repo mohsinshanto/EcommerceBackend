@@ -14,6 +14,7 @@ type OrderRepository interface {
 	GetByUserID(ctx context.Context, userID uint) ([]Order, error)
 	GetAll(ctx context.Context) ([]Order, error)
 	Create(ctx context.Context, tx *gorm.DB, order *Order) error
+	UpdatePaymentIfUnpaid(ctx context.Context, order *Order) (bool, error)
 	Update(ctx context.Context, order *Order) error
 	UpdatePaymentSession(
 		ctx context.Context,
@@ -86,6 +87,33 @@ func (r *orderRepository) Create(
 
 func (r *orderRepository) Update(ctx context.Context, order *Order) error {
 	return r.db.WithContext(ctx).Save(order).Error
+}
+func (r *orderRepository) UpdatePaymentIfUnpaid(
+	ctx context.Context,
+	order *Order,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&Order{}).
+		Where(
+			"id = ? AND LOWER(payment_status) <> ?",
+			order.ID,
+			"paid",
+		).
+		Updates(map[string]interface{}{
+			"payment_status": "Paid",
+			"validation_id":  order.ValidationID,
+			"gateway_amount": order.GatewayAmount,
+			"currency":       order.Currency,
+			"bank_tran_id":   order.BankTranID,
+			"card_type":      order.CardType,
+			"session_key":    order.SessionKey,
+		})
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	return result.RowsAffected > 0, nil
 }
 
 func (r *orderRepository) UpdatePaymentSession(
