@@ -4,6 +4,7 @@ import (
 	"context"
 	"ecommerce-backend/config"
 	"ecommerce-backend/internal/module/cart"
+	"ecommerce-backend/internal/module/category"
 	"ecommerce-backend/internal/module/order"
 	"ecommerce-backend/internal/module/product"
 	"ecommerce-backend/internal/module/user"
@@ -30,6 +31,7 @@ func main() {
 		&cart.Cart{},
 		&order.Order{},
 		&order.OrderItem{},
+		&category.Category{},
 	)
 
 	if err := product.EnsureTypesenseProductsCollection(context.Background()); err != nil {
@@ -42,6 +44,7 @@ func main() {
 	}
 	userModule := user.NewModule(config.DB)
 	productModule := product.NewModule(config.DB)
+	categoryModule := category.NewModule(config.DB)
 	cartModule := cart.NewModule(config.DB)
 	orderModule := order.NewModule(config.DB)
 	r := gin.Default()
@@ -52,7 +55,7 @@ func main() {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 		AllowOriginFunc: func(origin string) bool {
-			log.Printf("CORS origin: %q", origin)
+			//log.Printf("CORS origin: %q", origin)
 
 			return origin == "http://localhost:3000" ||
 				origin == "http://192.168.0.109:3000" ||
@@ -69,6 +72,7 @@ func main() {
 	})
 	userModule.RegisterRoutes(r)
 	productModule.RegisterRoutes(r)
+	categoryModule.RegisterRoutes(r)
 	cartModule.RegisterRoutes(r)
 	orderModule.RegisterRoutes(r)
 	if err := r.Run(":8080"); err != nil {
