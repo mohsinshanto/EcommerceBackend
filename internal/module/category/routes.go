@@ -32,4 +32,5 @@ func (m *Module) RegisterRoutes(router *gin.Engine) {
 	admin.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
 
 	admin.POST("/categories", m.Controller.CreateCategory)
+	admin.PUT("/categories/:id", m.Controller.UpdateCategory)
 }

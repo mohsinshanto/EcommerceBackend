@@ -2,6 +2,9 @@ package category
 
 import (
 	"context"
+	"errors"
+
+	appError "ecommerce-backend/errors"
 
 	"gorm.io/gorm"
 )
@@ -31,6 +34,9 @@ func (r *categoryRepository) GetByID(ctx context.Context, id uint) (*Category, e
 	var category Category
 
 	if err := r.db.WithContext(ctx).First(&category, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.ErrCategoryNotFound
+		}
 		return nil, err
 	}
 
