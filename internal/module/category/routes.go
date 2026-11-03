@@ -33,4 +33,5 @@ func (m *Module) RegisterRoutes(router *gin.Engine) {
 
 	admin.POST("/categories", m.Controller.CreateCategory)
 	admin.PUT("/categories/:id", m.Controller.UpdateCategory)
+	admin.DELETE("/categories/:id", m.Controller.DeleteCategory)
 }

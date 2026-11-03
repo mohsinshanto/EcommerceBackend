@@ -9,6 +9,7 @@ type CategoryService interface {
 	GetCategoryTree(ctx context.Context) ([]Category, error)
 	CreateCategory(ctx context.Context, category *Category) error
 	UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) error
+	DeleteCategory(ctx context.Context, id uint) error
 }
 
 type categoryService struct {
@@ -72,6 +73,23 @@ func buildCategoryTree(categories []Category) []Category {
 
 	return result
 }
+func ToCategoryResponse(category Category) CategoryResponse {
+	response := CategoryResponse{
+		ID:       category.ID,
+		Name:     category.Name,
+		ParentID: category.ParentID,
+		Children: make([]CategoryResponse, 0, len(category.Children)),
+	}
+
+	for _, child := range category.Children {
+		response.Children = append(
+			response.Children,
+			ToCategoryResponse(*child),
+		)
+	}
+
+	return response
+}
 func (s *categoryService) UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) error {
 
 	// 1. Find the category being updated.
@@ -117,4 +135,25 @@ func (s *categoryService) UpdateCategory(ctx context.Context, id uint, req Updat
 	category.ParentID = req.ParentID
 
 	return s.categoryRepo.Update(ctx, category)
+}
+func (s *categoryService) DeleteCategory(ctx context.Context, id uint) error {
+
+	// 1. Check whether the category exists.
+	_, err := s.categoryRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// 2. Check whether the category has children.
+	hasChildren, err := s.categoryRepo.HasChildren(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if hasChildren {
+		return appError.ErrCategoryHasChildren
+	}
+
+	// 3. Delete the category.
+	return s.categoryRepo.Delete(ctx, id)
 }

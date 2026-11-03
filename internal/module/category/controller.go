@@ -29,12 +29,16 @@ func (c *CategoryController) GetCategoryTree(ctx *gin.Context) {
 		)
 		return
 	}
+	response := make([]CategoryResponse, 0, len(categories))
 
+	for _, category := range categories {
+		response = append(response, ToCategoryResponse(category))
+	}
 	utils.RespondSuccess(
 		ctx,
 		http.StatusOK,
 		"Categories loaded successfully",
-		categories,
+		response,
 	)
 }
 func (c *CategoryController) CreateCategory(ctx *gin.Context) {
@@ -99,4 +103,31 @@ func (c *CategoryController) UpdateCategory(ctx *gin.Context) {
 
 	// 4. Return success response.
 	utils.RespondSuccess(ctx, http.StatusOK, "Category updated successfully", nil)
+}
+func (c *CategoryController) DeleteCategory(ctx *gin.Context) {
+	// 1. Get category ID from URL.
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		utils.RespondError(ctx, http.StatusBadRequest, "Invalid category ID")
+		return
+	}
+
+	// 2. Call service and handle errors.
+	if err := c.service.DeleteCategory(ctx.Request.Context(), uint(id)); err != nil {
+		switch {
+		case errors.Is(err, appError.ErrCategoryNotFound):
+			utils.RespondError(ctx, http.StatusNotFound, err.Error())
+
+		case errors.Is(err, appError.ErrCategoryHasChildren):
+			utils.RespondError(ctx, http.StatusConflict, err.Error())
+
+		default:
+			utils.RespondError(ctx, http.StatusInternalServerError, "Internal server error")
+		}
+
+		return
+	}
+
+	// 3. Success response.
+	utils.RespondSuccess(ctx, http.StatusOK, "Category deleted successfully", nil)
 }

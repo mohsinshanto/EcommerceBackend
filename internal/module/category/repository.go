@@ -16,6 +16,7 @@ type CategoryRepository interface {
 	GetAllWithChildren(ctx context.Context) ([]Category, error)
 	Update(ctx context.Context, category *Category) error
 	Delete(ctx context.Context, id uint) error
+	HasChildren(ctx context.Context, id uint) (bool, error)
 }
 
 type categoryRepository struct {
@@ -72,4 +73,19 @@ func (r *categoryRepository) Update(ctx context.Context, category *Category) err
 
 func (r *categoryRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&Category{}, id).Error
+}
+func (r *categoryRepository) HasChildren(ctx context.Context, id uint) (bool, error) {
+
+	var count int64
+
+	err := r.db.WithContext(ctx).
+		Model(&Category{}).
+		Where("parent_id = ?", id).
+		Count(&count).Error
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }
