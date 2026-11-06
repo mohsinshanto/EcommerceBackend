@@ -10,6 +10,7 @@ type CategoryService interface {
 	CreateCategory(ctx context.Context, category *Category) error
 	UpdateCategory(ctx context.Context, id uint, req UpdateCategoryRequest) error
 	DeleteCategory(ctx context.Context, id uint) error
+	GetDescendantIDs(ctx context.Context, categoryID uint) ([]uint, error)
 }
 
 type categoryService struct {
@@ -156,4 +157,40 @@ func (s *categoryService) DeleteCategory(ctx context.Context, id uint) error {
 
 	// 3. Delete the category.
 	return s.categoryRepo.Delete(ctx, id)
+}
+func (s *categoryService) GetDescendantIDs(
+	ctx context.Context,
+	categoryID uint,
+) ([]uint, error) {
+
+	// First, verify that the selected category exists.
+	_, err := s.categoryRepo.GetByID(ctx, categoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Include the selected category itself.
+	categoryIDs := []uint{categoryID}
+
+	// Start DFS traversal.
+	stack := []uint{categoryID}
+
+	for len(stack) > 0 {
+		// Take the last category ID from the stack.
+		currentID := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		// Get direct children of the current category.
+		children, err := s.categoryRepo.GetByParentID(ctx, currentID)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, child := range children {
+			categoryIDs = append(categoryIDs, child.ID)
+			stack = append(stack, child.ID)
+		}
+	}
+
+	return categoryIDs, nil
 }

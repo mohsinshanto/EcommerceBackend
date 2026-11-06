@@ -3,6 +3,7 @@ package product
 import (
 	"context"
 	"ecommerce-backend/config"
+	"ecommerce-backend/internal/module/category"
 	"log"
 	"strconv"
 	"strings"
@@ -18,11 +19,18 @@ type ProductService interface {
 	GetProductByID(parent context.Context, id int) (ProductResponse, error)
 }
 type productService struct {
-	repo ProductRepository
+	repo            ProductRepository
+	categoryService category.CategoryService
 }
 
-func NewProductService(repo ProductRepository) ProductService {
-	return &productService{repo: repo}
+func NewProductService(
+	repo ProductRepository,
+	categoryService category.CategoryService,
+) ProductService {
+	return &productService{
+		repo:            repo,
+		categoryService: categoryService,
+	}
 }
 
 func (s *productService) GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, bool, error) {
@@ -32,8 +40,9 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 	offset := max((params.Page-1)*params.Limit, 0)
 
 	searchQuery := s.buildProductSearchQuery(params.Search)
-	if searchQuery != "" && config.Typesense != nil {
-		products, found, hasNext, err := SearchProductsWithTypesense(queryCtx, params)
+	if searchQuery != "" && params.Category == "" && config.Typesense != nil {
+		products, found, hasNext, err := s.SearchProductsWithTypesense(queryCtx, params)
+
 		if err == nil {
 			totalCount, countErr := s.GetProductCount(queryCtx)
 			if countErr != nil {
@@ -65,22 +74,38 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 		maxPrice = val
 		hasPrice = true
 	}
+	var categoryIDs []uint
 
-	filters := ProductFilters{
-		Search:   searchQuery,
-		Category: params.Category,
-		MinPrice: minPrice,
-		MaxPrice: maxPrice,
-		Sort:     params.Sort,
-		Limit:    params.Limit + 1,
-		Offset:   offset,
-		HasPrice: hasPrice,
+	if params.Category != "" {
+		categoryID, err := strconv.ParseUint(params.Category, 10, 64)
+		if err != nil {
+			return nil, 0, nil, false, err
+		}
+
+		categoryIDs, err = s.categoryService.GetDescendantIDs(
+			queryCtx,
+			uint(categoryID),
+		)
+		if err != nil {
+			return nil, 0, nil, false, err
+		}
 	}
-	totalProduct, err := s.GetProductCount(queryCtx)
+	filters := ProductFilters{
+		Search:      searchQuery,
+		CategoryIDs: categoryIDs,
+		MinPrice:    minPrice,
+		MaxPrice:    maxPrice,
+		Sort:        params.Sort,
+		Limit:       params.Limit + 1,
+		Offset:      offset,
+		HasPrice:    hasPrice,
+	}
+
+	products, err := s.repo.GetWithFilters(queryCtx, filters)
 	if err != nil {
 		return nil, 0, nil, false, err
 	}
-	products, err := s.repo.GetWithFilters(queryCtx, filters)
+	totalProduct, err := s.GetProductCount(queryCtx)
 	if err != nil {
 		return nil, 0, nil, false, err
 	}
@@ -94,20 +119,26 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 	response := make([]ProductResponse, 0, len(products))
 	for _, p := range products {
 		response = append(response, ProductResponse{
-			ID:          p.ID,
-			Name:        p.Name,
-			Description: p.Description,
-			Price:       p.Price,
-			Stock:       p.Stock,
-			ImageURL:    p.ImageURL,
-			Category:    p.Category,
+			ID:           p.ID,
+			Name:         p.Name,
+			Description:  p.Description,
+			Price:        p.Price,
+			Stock:        p.Stock,
+			ImageURL:     p.ImageURL,
+			Category:     p.Category,
+			CategoryID:   p.CategoryID,
+			CategoryInfo: p.CategoryInfo,
 		})
 	}
 
 	return response, totalProduct, nil, hasNext, nil
 }
 
-func (s *productService) GetCategoryCounts(parent context.Context, params GetProductsParams) map[string]int {
+func (s *productService) GetCategoryCounts(
+	parent context.Context,
+	params GetProductsParams,
+) map[string]int {
+
 	defaultCounts := map[string]int{
 		"mobile":      0,
 		"laptop":      0,
@@ -115,14 +146,34 @@ func (s *productService) GetCategoryCounts(parent context.Context, params GetPro
 		"accessories": 0,
 	}
 
-	if config.Typesense == nil {
-		return defaultCounts
-	}
-
 	queryCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
-	counts, err := GetCategoryCountsWithTypesense(queryCtx, params)
+	filters := ProductFilters{
+		Search: s.buildProductSearchQuery(params.Search),
+	}
+
+	if params.MinPrice != "" {
+		minPrice, err := strconv.ParseFloat(params.MinPrice, 64)
+		if err != nil {
+			return defaultCounts
+		}
+
+		filters.MinPrice = minPrice
+		filters.HasPrice = true
+	}
+
+	if params.MaxPrice != "" {
+		maxPrice, err := strconv.ParseFloat(params.MaxPrice, 64)
+		if err != nil {
+			return defaultCounts
+		}
+
+		filters.MaxPrice = maxPrice
+		filters.HasPrice = true
+	}
+
+	counts, err := s.repo.GetCategoryCounts(queryCtx, filters)
 	if err != nil {
 		return defaultCounts
 	}
@@ -227,13 +278,15 @@ func (s *productService) GetProductByID(parent context.Context, id int) (Product
 	}
 
 	return ProductResponse{
-		ID:          product.ID,
-		Name:        product.Name,
-		Description: product.Description,
-		Price:       product.Price,
-		Stock:       product.Stock,
-		ImageURL:    product.ImageURL,
-		Category:    product.Category,
+		ID:           product.ID,
+		Name:         product.Name,
+		Description:  product.Description,
+		Price:        product.Price,
+		Stock:        product.Stock,
+		ImageURL:     product.ImageURL,
+		Category:     product.Category,
+		CategoryID:   product.CategoryID,
+		CategoryInfo: product.CategoryInfo,
 	}, nil
 }
 

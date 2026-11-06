@@ -18,6 +18,9 @@ type typesenseCollectionSchema struct {
 	Fields              []typesenseSchemaField `json:"fields"`
 	DefaultSortingField string                 `json:"default_sorting_field,omitempty"`
 }
+type typesenseCollectionSchemaUpdate struct {
+	Fields []typesenseSchemaField `json:"fields"`
+}
 
 type typesenseSchemaField struct {
 	Name     string `json:"name"`
@@ -33,6 +36,7 @@ type typesenseProductDocument struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description,omitempty"`
 	Category    string  `json:"category"`
+	CategoryID  uint    `json:"category_id"`
 	Price       float64 `json:"price"`
 	Stock       int     `json:"stock"`
 	ImageURL    string  `json:"image_url,omitempty"`
@@ -74,6 +78,7 @@ func EnsureTypesenseProductsCollection(ctx context.Context) error {
 			{Name: "id", Type: "string"},
 			{Name: "name", Type: "string"},
 			{Name: "category", Type: "string", Facet: true},
+			{Name: "category_id", Type: "int32", Facet: true},
 			{Name: "price", Type: "float", Sort: true},
 			{Name: "stock", Type: "int32", Sort: true},
 			{Name: "created_at", Type: "int64", Sort: true},
@@ -127,7 +132,11 @@ func DeleteProductFromTypesense(ctx context.Context, id uint) error {
 	return err
 }
 
-func SearchProductsWithTypesense(ctx context.Context, params GetProductsParams) ([]ProductResponse, int64, bool, error) {
+func (s *productService) SearchProductsWithTypesense(
+	ctx context.Context,
+	params GetProductsParams,
+) ([]ProductResponse, int64, bool, error) {
+
 	if config.Typesense == nil {
 		return nil, 0, false, fmt.Errorf("typesense is not enabled")
 	}
@@ -138,7 +147,7 @@ func SearchProductsWithTypesense(ctx context.Context, params GetProductsParams) 
 
 	query := url.Values{}
 	query.Set("q", strings.TrimSpace(params.Search))
-	query.Set("query_by", "name") // full text search
+	query.Set("query_by", "name")
 	query.Set("prefix", "false")
 	query.Set("page", strconv.Itoa(max(params.Page, 1)))
 	query.Set("per_page", strconv.Itoa(max(params.Limit+1, 1)))
@@ -167,25 +176,67 @@ func SearchProductsWithTypesense(ctx context.Context, params GetProductsParams) 
 	if err != nil {
 		return nil, 0, false, err
 	}
+
 	var response typesenseSearchResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, 0, false, err
 	}
 
-	products := make([]ProductResponse, 0, len(response.Hits))
+	// Step 1: Collect product IDs from Typesense results.
+	ids := make([]uint, 0, len(response.Hits))
+
 	for _, hit := range response.Hits {
+		id := parseUintDocumentID(hit.Document.ID)
+
+		if id != 0 {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		return []ProductResponse{}, int64(response.Found), false, nil
+	}
+
+	// Step 2: Fetch products from MySQL with CategoryInfo.
+	dbProducts, err := s.repo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	// Step 3: Create a map for product lookup.
+	productMap := make(map[uint]Product, len(dbProducts))
+
+	for _, product := range dbProducts {
+		productMap[product.ID] = product
+	}
+
+	// Step 4: Build response in Typesense result order.
+	products := make([]ProductResponse, 0, len(response.Hits))
+
+	for _, hit := range response.Hits {
+		id := parseUintDocumentID(hit.Document.ID)
+
+		product, exists := productMap[id]
+		if !exists {
+			continue
+		}
+
 		products = append(products, ProductResponse{
-			ID:          parseUintDocumentID(hit.Document.ID),
-			Name:        hit.Document.Name,
-			Description: hit.Document.Description,
-			Price:       hit.Document.Price,
-			Stock:       hit.Document.Stock,
-			ImageURL:    hit.Document.ImageURL,
-			Category:    hit.Document.Category,
+			ID:           product.ID,
+			Name:         product.Name,
+			Description:  product.Description,
+			Price:        product.Price,
+			Stock:        product.Stock,
+			ImageURL:     product.ImageURL,
+			Category:     product.Category,
+			CategoryID:   product.CategoryID,
+			CategoryInfo: product.CategoryInfo,
 		})
 	}
 
+	// Step 5: Handle pagination.
 	hasNext := len(products) > params.Limit
+
 	if hasNext {
 		products = products[:params.Limit]
 	}
@@ -243,13 +294,19 @@ func GetCategoryCountsWithTypesense(ctx context.Context, params GetProductsParam
 
 	return counts, nil
 }
-
+func categoryIDValue(categoryID *uint) uint {
+	if categoryID == nil {
+		return 0
+	}
+	return *categoryID
+}
 func typesenseProductDocumentFromModel(product Product) typesenseProductDocument {
 	return typesenseProductDocument{
 		ID:          strconv.FormatUint(uint64(product.ID), 10),
 		Name:        product.Name,
 		Description: product.Description,
 		Category:    product.Category,
+		CategoryID:  categoryIDValue(product.CategoryID),
 		Price:       product.Price,
 		Stock:       product.Stock,
 		ImageURL:    product.ImageURL,
@@ -387,5 +444,30 @@ func BulkUpsertProductsToTypesense(ctx context.Context, products []Product) erro
 		query,
 		payload.Bytes(),
 	)
+	return err
+}
+func AddCategoryIDFieldToTypesense(ctx context.Context) error {
+	if config.Typesense == nil {
+		return fmt.Errorf("typesense is not enabled")
+	}
+	schema := typesenseCollectionSchemaUpdate{
+		Fields: []typesenseSchemaField{
+			{
+				Name:     "category_id",
+				Type:     "int32",
+				Facet:    true,
+				Optional: true,
+			},
+		},
+	}
+
+	_, _, err := config.Typesense.Request(
+		ctx,
+		http.MethodPatch,
+		"/collections/"+config.Typesense.Collection(),
+		nil,
+		schema,
+	)
+
 	return err
 }

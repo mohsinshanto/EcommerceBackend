@@ -1,15 +1,19 @@
 package product
 
+import "ecommerce-backend/internal/module/category"
+
 const productCountCacheKey = "product:count"
 
 type ProductResponse struct {
-	ID          uint    `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price"`
-	Stock       int     `json:"stock"`
-	ImageURL    string  `json:"image_url"`
-	Category    string  `json:"category"`
+	ID           uint               `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	Price        float64            `json:"price"`
+	Stock        int                `json:"stock"`
+	ImageURL     string             `json:"image_url"`
+	Category     string             `json:"category"`
+	CategoryID   *uint              `json:"category_id"`
+	CategoryInfo *category.Category `json:"category_info"`
 }
 
 type CreateProductRequest struct {
@@ -23,14 +27,15 @@ type CreateProductRequest struct {
 
 // For service
 type ProductFilters struct {
-	Search   string
-	Category string
-	MinPrice float64
-	MaxPrice float64
-	Sort     string
-	Limit    int
-	Offset   int
-	HasPrice bool
+	Search      string
+	Category    string
+	MinPrice    float64
+	MaxPrice    float64
+	Sort        string
+	Limit       int
+	Offset      int
+	HasPrice    bool
+	CategoryIDs []uint
 }
 
 // For controller

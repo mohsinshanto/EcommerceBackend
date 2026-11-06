@@ -54,7 +54,7 @@ func InitTypesense() {
 		baseURL:    fmt.Sprintf("%s://%s:%s", protocol, host, port),
 		apiKey:     apiKey,
 		collection: collection,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 
 	log.Printf("Typesense enabled at %s for collection %s", Typesense.baseURL, Typesense.collection)

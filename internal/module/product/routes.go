@@ -1,6 +1,7 @@
 package product
 
 import (
+	"ecommerce-backend/internal/module/category"
 	"ecommerce-backend/internal/module/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -11,10 +12,14 @@ type Module struct {
 	Controller *ProductController
 }
 
-func NewModule(db *gorm.DB) *Module {
+func NewModule(
+	db *gorm.DB,
+	categoryService category.CategoryService,
+) *Module {
 	repo := NewProductRepository(db)
-	service := NewProductService(repo)
+	service := NewProductService(repo, categoryService)
 	controller := NewProductController(service)
+
 	return &Module{
 		Controller: controller,
 	}

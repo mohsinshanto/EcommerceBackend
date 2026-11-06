@@ -17,6 +17,7 @@ type CategoryRepository interface {
 	Update(ctx context.Context, category *Category) error
 	Delete(ctx context.Context, id uint) error
 	HasChildren(ctx context.Context, id uint) (bool, error)
+	GetByParentID(ctx context.Context, parentID uint) ([]Category, error)
 }
 
 type categoryRepository struct {
@@ -88,4 +89,20 @@ func (r *categoryRepository) HasChildren(ctx context.Context, id uint) (bool, er
 	}
 
 	return count > 0, nil
+}
+func (r *categoryRepository) GetByParentID(
+	ctx context.Context,
+	parentID uint,
+) ([]Category, error) {
+	var categories []Category
+
+	err := r.db.WithContext(ctx).
+		Where("parent_id = ?", parentID).
+		Find(&categories).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return categories, nil
 }
