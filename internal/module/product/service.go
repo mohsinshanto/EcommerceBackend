@@ -12,7 +12,7 @@ import (
 
 type ProductService interface {
 	CreateProduct(parent context.Context, req CreateProductRequest) (ProductResponse, error)
-	GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, bool, error)
+	GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, map[string]int, bool, error)
 	GetCategoryCounts(parent context.Context, params GetProductsParams) map[string]int
 	DeleteProduct(parent context.Context, id int) error
 	GetProductCount(parent context.Context) (int64, error)
@@ -33,22 +33,38 @@ func NewProductService(
 	}
 }
 
-func (s *productService) GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, bool, error) {
+func (s *productService) GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, map[string]int, bool, error) {
 	queryCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	offset := max((params.Page-1)*params.Limit, 0)
 
 	searchQuery := s.buildProductSearchQuery(params.Search)
-	if searchQuery != "" && params.Category == "" && config.Typesense != nil {
-		products, found, hasNext, err := s.SearchProductsWithTypesense(queryCtx, params)
+	var categoryIDs []uint
+
+	if params.Category != "" {
+		categoryID, err := strconv.ParseUint(params.Category, 10, 64)
+		if err != nil {
+			return nil, 0, nil, nil, false, err
+		}
+
+		categoryIDs, err = s.categoryService.GetDescendantIDs(
+			queryCtx,
+			uint(categoryID),
+		)
+		if err != nil {
+			return nil, 0, nil, nil, false, err
+		}
+	}
+	if config.Typesense != nil {
+		products, found, categoryCounts, hasNext, err := s.SearchProductsWithTypesense(queryCtx, params, categoryIDs)
 
 		if err == nil {
 			totalCount, countErr := s.GetProductCount(queryCtx)
 			if countErr != nil {
-				return nil, 0, nil, false, countErr
+				return nil, 0, nil, nil, false, countErr
 			}
-			return products, totalCount, &found, hasNext, nil
+			return products, totalCount, &found, categoryCounts, hasNext, nil
 		}
 	}
 
@@ -60,7 +76,7 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 	if params.MinPrice != "" {
 		val, err := strconv.ParseFloat(params.MinPrice, 64)
 		if err != nil {
-			return nil, 0, nil, false, err
+			return nil, 0, nil, nil, false, err
 		}
 		minPrice = val
 		hasPrice = true
@@ -69,27 +85,12 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 	if params.MaxPrice != "" {
 		val, err := strconv.ParseFloat(params.MaxPrice, 64)
 		if err != nil {
-			return nil, 0, nil, false, err
+			return nil, 0, nil, nil, false, err
 		}
 		maxPrice = val
 		hasPrice = true
 	}
-	var categoryIDs []uint
 
-	if params.Category != "" {
-		categoryID, err := strconv.ParseUint(params.Category, 10, 64)
-		if err != nil {
-			return nil, 0, nil, false, err
-		}
-
-		categoryIDs, err = s.categoryService.GetDescendantIDs(
-			queryCtx,
-			uint(categoryID),
-		)
-		if err != nil {
-			return nil, 0, nil, false, err
-		}
-	}
 	filters := ProductFilters{
 		Search:      searchQuery,
 		CategoryIDs: categoryIDs,
@@ -103,11 +104,11 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 
 	products, err := s.repo.GetWithFilters(queryCtx, filters)
 	if err != nil {
-		return nil, 0, nil, false, err
+		return nil, 0, nil, nil, false, err
 	}
 	totalProduct, err := s.GetProductCount(queryCtx)
 	if err != nil {
-		return nil, 0, nil, false, err
+		return nil, 0, nil, nil, false, err
 	}
 
 	hasNext := len(products) > params.Limit
@@ -131,7 +132,7 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 		})
 	}
 
-	return response, totalProduct, nil, hasNext, nil
+	return response, totalProduct, nil, nil, hasNext, nil
 }
 
 func (s *productService) GetCategoryCounts(

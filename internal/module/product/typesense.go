@@ -135,24 +135,31 @@ func DeleteProductFromTypesense(ctx context.Context, id uint) error {
 func (s *productService) SearchProductsWithTypesense(
 	ctx context.Context,
 	params GetProductsParams,
-) ([]ProductResponse, int64, bool, error) {
+	categoryIDs []uint,
+) ([]ProductResponse, int64, map[string]int, bool, error) {
 
 	if config.Typesense == nil {
-		return nil, 0, false, fmt.Errorf("typesense is not enabled")
+		return nil, 0, nil, false, fmt.Errorf("typesense is not enabled")
 	}
 
 	if err := EnsureTypesenseProductsCollection(ctx); err != nil {
-		return nil, 0, false, err
+		return nil, 0, nil, false, err
 	}
 
 	query := url.Values{}
-	query.Set("q", strings.TrimSpace(params.Search))
+	searchTerm := strings.TrimSpace(params.Search)
+
+	if searchTerm == "" {
+		searchTerm = "*"
+	}
+
+	query.Set("q", searchTerm)
 	query.Set("query_by", "name")
 	query.Set("prefix", "false")
 	query.Set("page", strconv.Itoa(max(params.Page, 1)))
 	query.Set("per_page", strconv.Itoa(max(params.Limit+1, 1)))
 
-	filterBy := buildTypesenseFilter(params)
+	filterBy := buildTypesenseFilter(params, categoryIDs)
 	if filterBy != "" {
 		query.Set("filter_by", filterBy)
 	}
@@ -174,14 +181,56 @@ func (s *productService) SearchProductsWithTypesense(
 		nil,
 	)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, nil, false, err
 	}
 
 	var response typesenseSearchResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, 0, false, err
+		return nil, 0, nil, false, err
+	}
+	// Get category counts separately.
+	facetQuery := url.Values{}
+
+	facetQuery.Set("q", searchTerm)
+	facetQuery.Set("query_by", "name")
+	facetQuery.Set("prefix", "false")
+	facetQuery.Set("facet_by", "category_id")
+	facetQuery.Set("max_facet_values", "100")
+	facetQuery.Set("page", "1")
+	facetQuery.Set("per_page", "1")
+
+	facetFilter := buildTypesenseFacetFilter(params)
+	if facetFilter != "" {
+		facetQuery.Set("filter_by", facetFilter)
 	}
 
+	facetBody, _, err := config.Typesense.Request(
+		ctx,
+		http.MethodGet,
+		"/collections/"+config.Typesense.Collection()+"/documents/search",
+		facetQuery,
+		nil,
+	)
+	if err != nil {
+		return nil, 0, nil, false, err
+	}
+
+	var facetResponse typesenseSearchResponse
+	if err := json.Unmarshal(facetBody, &facetResponse); err != nil {
+		return nil, 0, nil, false, err
+	}
+
+	categoryCounts := make(map[string]int)
+
+	for _, facet := range facetResponse.FacetCounts {
+		if facet.FieldName != "category_id" {
+			continue
+		}
+
+		for _, item := range facet.Counts {
+			categoryCounts[item.Value] = item.Count
+		}
+	}
 	// Step 1: Collect product IDs from Typesense results.
 	ids := make([]uint, 0, len(response.Hits))
 
@@ -194,13 +243,13 @@ func (s *productService) SearchProductsWithTypesense(
 	}
 
 	if len(ids) == 0 {
-		return []ProductResponse{}, int64(response.Found), false, nil
+		return []ProductResponse{}, int64(response.Found), categoryCounts, false, nil
 	}
 
 	// Step 2: Fetch products from MySQL with CategoryInfo.
 	dbProducts, err := s.repo.GetByIDs(ctx, ids)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, nil, false, err
 	}
 
 	// Step 3: Create a map for product lookup.
@@ -240,8 +289,7 @@ func (s *productService) SearchProductsWithTypesense(
 	if hasNext {
 		products = products[:params.Limit]
 	}
-
-	return products, int64(response.Found), hasNext, nil
+	return products, int64(response.Found), categoryCounts, hasNext, nil
 }
 
 func GetCategoryCountsWithTypesense(ctx context.Context, params GetProductsParams) (map[string]int, error) {
@@ -314,22 +362,63 @@ func typesenseProductDocumentFromModel(product Product) typesenseProductDocument
 	}
 }
 
-func buildTypesenseFilter(params GetProductsParams) string {
+func buildTypesenseFilter(
+	params GetProductsParams,
+	categoryIDs []uint,
+) string {
 	filters := make([]string, 0, 3)
 
-	if params.Category != "" {
-		filters = append(filters, fmt.Sprintf("category:=%s", escapeTypesenseFilterValue(params.Category)))
+	if len(categoryIDs) > 0 {
+		ids := make([]string, 0, len(categoryIDs))
+
+		for _, id := range categoryIDs {
+			ids = append(ids, strconv.FormatUint(uint64(id), 10))
+		}
+
+		filters = append(
+			filters,
+			fmt.Sprintf("category_id:=[%s]", strings.Join(ids, ",")),
+		)
 	}
 
 	if params.MinPrice != "" {
 		if min, err := strconv.ParseFloat(params.MinPrice, 64); err == nil {
-			filters = append(filters, fmt.Sprintf("price:>=%s", strconv.FormatFloat(min, 'f', -1, 64)))
+			filters = append(
+				filters,
+				fmt.Sprintf("price:>=%s", strconv.FormatFloat(min, 'f', -1, 64)),
+			)
 		}
 	}
 
 	if params.MaxPrice != "" {
 		if maxValue, err := strconv.ParseFloat(params.MaxPrice, 64); err == nil {
-			filters = append(filters, fmt.Sprintf("price:<=%s", strconv.FormatFloat(maxValue, 'f', -1, 64)))
+			filters = append(
+				filters,
+				fmt.Sprintf("price:<=%s", strconv.FormatFloat(maxValue, 'f', -1, 64)),
+			)
+		}
+	}
+
+	return strings.Join(filters, " && ")
+}
+func buildTypesenseFacetFilter(params GetProductsParams) string {
+	filters := make([]string, 0, 2)
+
+	if params.MinPrice != "" {
+		if min, err := strconv.ParseFloat(params.MinPrice, 64); err == nil {
+			filters = append(
+				filters,
+				fmt.Sprintf("price:>=%s", strconv.FormatFloat(min, 'f', -1, 64)),
+			)
+		}
+	}
+
+	if params.MaxPrice != "" {
+		if max, err := strconv.ParseFloat(params.MaxPrice, 64); err == nil {
+			filters = append(
+				filters,
+				fmt.Sprintf("price:<=%s", strconv.FormatFloat(max, 'f', -1, 64)),
+			)
 		}
 	}
 
@@ -352,14 +441,6 @@ func buildTypesenseFilterWithoutCategory(params GetProductsParams) string {
 	}
 
 	return strings.Join(filters, " && ")
-}
-
-func escapeTypesenseFilterValue(value string) string {
-	value = strings.TrimSpace(value)
-	if strings.ContainsAny(value, ",` ") {
-		return "`" + strings.ReplaceAll(value, "`", "\\`") + "`"
-	}
-	return value
 }
 
 func parseUintDocumentID(value string) uint {

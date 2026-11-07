@@ -37,19 +37,6 @@ func main() {
 	if err := product.EnsureTypesenseProductsCollection(context.Background()); err != nil {
 		log.Printf("WARNING: failed to ensure Typesense products collection: %v", err)
 	}
-	if os.Getenv("SYNC_TYPESENSE") == "true" {
-		log.Println("Starting Typesense product re-sync...")
-
-		if err := product.SyncAllProductsToTypesense(
-			context.Background(),
-			500,
-		); err != nil {
-			log.Fatalf("Typesense sync failed: %v", err)
-		}
-
-		log.Println("Typesense product re-sync completed successfully")
-		return
-	}
 	frontendOrigins := []string{"http://localhost:3000"}
 	if configuredOrigins := os.Getenv("FRONTEND_ORIGINS"); configuredOrigins != "" {
 		frontendOrigins = splitAndTrim(configuredOrigins)

@@ -30,12 +30,11 @@ func (c *ProductController) GetProducts(ctx *gin.Context) {
 		Limit:    limit,
 	}
 
-	products, count, searchCount, hasNext, err := c.service.GetProducts(ctx.Request.Context(), params)
+	products, count, searchCount, categoryCounts, hasNext, err := c.service.GetProducts(ctx.Request.Context(), params)
 	if err != nil {
 		utils.RespondError(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
-	categoryCounts := c.service.GetCategoryCounts(ctx.Request.Context(), params)
 	utils.RespondSuccess(ctx, http.StatusOK, "Products loaded", gin.H{
 		"products":        products,
 		"count":           count,
