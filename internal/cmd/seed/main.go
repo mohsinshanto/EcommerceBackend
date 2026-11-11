@@ -6,29 +6,47 @@ import (
 	"log"
 	"math/rand"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"ecommerce-backend/config"
-	"ecommerce-backend/internal/module/cart"
-	"ecommerce-backend/internal/module/order"
 	"ecommerce-backend/internal/module/product"
-	"ecommerce-backend/internal/module/user"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	firstNames   = []string{"Ayan", "Nabil", "Samiha", "Nusrat", "Rafi", "Mim", "Tahmid", "Raisa", "Shanto", "Sadia", "Farhan", "Tania"}
-	lastNames    = []string{"Rahman", "Ahmed", "Karim", "Islam", "Hossain", "Sultana", "Chowdhury", "Hasan", "Akter", "Kabir"}
-	adjectives   = []string{"Premium", "Smart", "Portable", "Elite", "Urban", "Wireless", "Pro", "Classic", "Modern", "Compact", "Essential", "Signature"}
+	adjectives = []string{
+		"Premium", "Smart", "Portable", "Elite", "Urban",
+		"Wireless", "Pro", "Classic", "Modern", "Compact",
+		"Essential", "Signature",
+	}
+
 	productNouns = map[string][]string{
+		// Electronics
 		"mobile":      {"Phone", "Handset", "Smartphone", "Device"},
 		"laptop":      {"Laptop", "Notebook", "Ultrabook", "Workstation"},
 		"audio":       {"Speaker", "Headphone", "Earbuds", "Soundbar"},
 		"accessories": {"Mouse", "Keyboard", "Stand", "Charger", "Power Bank"},
+
+		// Fashion
+		"men's clothing":   {"Polo Shirt", "T-Shirt", "Denim Jacket", "Casual Shirt"},
+		"women's clothing": {"Dress", "Blouse", "Kurti", "Top"},
+		"shoes":            {"Sneakers", "Running Shoes", "Casual Shoes", "Formal Shoes"},
+		"watches":          {"Wrist Watch", "Smart Watch", "Classic Watch"},
+		"bags":             {"Backpack", "Handbag", "Shoulder Bag", "Travel Bag"},
+
+		// Sports & Fitness
+		"fitness equipment": {"Dumbbell", "Yoga Mat", "Resistance Band", "Exercise Bench"},
+		"sportswear":        {"Sports T-Shirt", "Track Pants", "Training Shorts", "Sports Jacket"},
+		"outdoor gear":      {"Camping Tent", "Hiking Backpack", "Sleeping Bag", "Water Bottle"},
+
+		// Home & Living
+		"furniture":          {"Chair", "Table", "Sofa", "Bookshelf"},
+		"kitchen appliances": {"Blender", "Electric Kettle", "Rice Cooker", "Toaster"},
+		"home decor":         {"Wall Clock", "Vase", "Decorative Mirror", "Photo Frame"},
+		"lighting":           {"Table Lamp", "Ceiling Light", "Desk Lamp", "Floor Lamp"},
 	}
+
 	categoryDescriptions = map[string][]string{
+		// Electronics
 		"mobile": {
 			"Built for smooth everyday performance with a bright display and dependable battery life.",
 			"A balanced phone for calls, streaming, browsing, and daily work without hassle.",
@@ -45,8 +63,64 @@ var (
 			"A useful accessory that improves comfort, setup flexibility, and day-to-day convenience.",
 			"Built for regular use with a simple design and dependable everyday function.",
 		},
+
+		// Fashion
+		"men's clothing": {
+			"Comfortable men's clothing designed for everyday wear and a modern look.",
+			"Made with quality materials for casual outings and daily comfort.",
+		},
+		"women's clothing": {
+			"Stylish women's clothing combining comfort and a contemporary design.",
+			"Designed for everyday use with an elegant and comfortable fit.",
+		},
+		"shoes": {
+			"Comfortable footwear designed for everyday activities and long-lasting use.",
+			"A practical pair of shoes combining modern style and reliable comfort.",
+		},
+		"watches": {
+			"A stylish timepiece with a clean design for everyday use.",
+			"Combines practical functionality with a modern appearance.",
+		},
+		"bags": {
+			"A practical bag with useful storage space for everyday essentials.",
+			"Designed with a modern look and convenient storage compartments.",
+		},
+
+		// Sports & Fitness
+		"fitness equipment": {
+			"Designed to support home workouts and everyday fitness activities.",
+			"A practical fitness accessory for building strength and maintaining an active lifestyle.",
+		},
+		"sportswear": {
+			"Comfortable sportswear designed for training, exercise, and active lifestyles.",
+			"Lightweight clothing that provides comfort and flexibility during workouts.",
+		},
+		"outdoor gear": {
+			"Practical outdoor equipment designed for travel, hiking, and adventure.",
+			"Built for outdoor activities with a convenient and durable design.",
+		},
+
+		// Home & Living
+		"furniture": {
+			"Functional furniture designed to improve comfort and everyday living spaces.",
+			"A modern furniture piece combining practical use and attractive design.",
+		},
+		"kitchen appliances": {
+			"Convenient kitchen equipment designed to make everyday cooking easier.",
+			"A practical kitchen appliance for reliable everyday use.",
+		},
+		"home decor": {
+			"An attractive home accessory designed to enhance your living space.",
+			"Adds a decorative touch to modern homes and interiors.",
+		},
+		"lighting": {
+			"Modern lighting designed to provide comfortable illumination for your space.",
+			"A practical lighting solution with an attractive contemporary design.",
+		},
 	}
-	imagePool = []string{
+
+	// Existing Electronics images
+	electronicsImages = []string{
 		"/products/acer.avif",
 		"/products/asusrog.jpeg",
 		"/products/beats.jpeg",
@@ -75,43 +149,119 @@ var (
 	}
 )
 
+type productCategory struct {
+	name string
+	id   uint
+}
+
+type seedGroup struct {
+	name       string
+	categories []productCategory
+	images     []string
+}
+
 type seedConfig struct {
-	users    int
 	products int
 	batch    int
-	prefix   string
-	password string
+	category string
+}
+
+// Category IDs are the existing database IDs.
+var electronicsCategories = []productCategory{
+	{name: "laptop", id: 2},
+	{name: "mobile", id: 6},
+	{name: "audio", id: 7},
+	{name: "accessories", id: 8},
+}
+
+var fashionCategories = []productCategory{
+	{name: "men's clothing", id: 10},
+	{name: "women's clothing", id: 11},
+	{name: "shoes", id: 12},
+	{name: "watches", id: 13},
+	{name: "bags", id: 14},
+}
+
+var sportsCategories = []productCategory{
+	{name: "fitness equipment", id: 16},
+	{name: "sportswear", id: 17},
+	{name: "outdoor gear", id: 18},
+}
+
+var homeCategories = []productCategory{
+	{name: "furniture", id: 20},
+	{name: "kitchen appliances", id: 21},
+	{name: "home decor", id: 22},
+	{name: "lighting", id: 23},
+}
+
+func buildImagePool(prefix string, count int) []string {
+	images := make([]string, 0, count)
+
+	for i := 1; i <= count; i++ {
+		images = append(
+			images,
+			filepath.ToSlash(fmt.Sprintf("/products/%s%d.jpg", prefix, i)),
+		)
+	}
+
+	return images
+}
+
+func getSeedGroups(category string) ([]seedGroup, error) {
+	fashion := seedGroup{
+		name:       "Fashion",
+		categories: fashionCategories,
+		images:     buildImagePool("fashion", 11),
+	}
+
+	sports := seedGroup{
+		name:       "Sports & Fitness",
+		categories: sportsCategories,
+		images:     buildImagePool("fitness", 8),
+	}
+
+	home := seedGroup{
+		name:       "Home & Living",
+		categories: homeCategories,
+		images:     buildImagePool("home", 10),
+	}
+
+	electronics := seedGroup{
+		name:       "Electronics",
+		categories: electronicsCategories,
+		images:     electronicsImages,
+	}
+
+	switch category {
+	case "new":
+		return []seedGroup{fashion, sports, home}, nil
+	case "fashion":
+		return []seedGroup{fashion}, nil
+	case "sports":
+		return []seedGroup{sports}, nil
+	case "home":
+		return []seedGroup{home}, nil
+	case "electronics":
+		return []seedGroup{electronics}, nil
+	case "all":
+		return []seedGroup{electronics, fashion, sports, home}, nil
+	default:
+		return nil, fmt.Errorf("invalid category: %s", category)
+	}
 }
 
 func main() {
 	cfg := parseFlags()
 
 	config.LoadEnv()
-	config.LoadJWTSecret()
 	config.ConnectDB()
 
-	if err := config.DB.AutoMigrate(
-		&user.User{},
-		&product.Product{},
-		&cart.Cart{},
-		&order.Order{},
-		&order.OrderItem{},
-	); err != nil {
-		log.Fatalf("failed to migrate schema: %v", err)
+	if err := config.DB.AutoMigrate(&product.Product{}); err != nil {
+		log.Fatalf("failed to migrate product schema: %v", err)
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(cfg.password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Fatalf("failed to hash seed password: %v", err)
-	}
-
-	if cfg.users > 0 {
-		if err := seedUsers(cfg, rng, string(hashedPassword)); err != nil {
-			log.Fatalf("failed to seed users: %v", err)
-		}
-	}
 
 	if cfg.products > 0 {
 		if err := seedProducts(cfg, rng); err != nil {
@@ -119,20 +269,16 @@ func main() {
 		}
 	}
 
-	fmt.Println("Seeding complete.")
-	fmt.Printf("Seeded user password: %s\n", cfg.password)
-	fmt.Printf("Seed prefix used for users: %s\n", cfg.prefix)
+	fmt.Println("Product seeding complete.")
 }
 
 func parseFlags() seedConfig {
-	defaultPrefix := fmt.Sprintf("seed%d", time.Now().Unix())
-
 	cfg := seedConfig{}
-	flag.IntVar(&cfg.users, "users", 10000, "number of users to seed")
-	flag.IntVar(&cfg.products, "products", 10000, "number of products to seed")
+
+	flag.IntVar(&cfg.products, "products", 2000, "number of products per main category")
 	flag.IntVar(&cfg.batch, "batch", 500, "insert batch size")
-	flag.StringVar(&cfg.prefix, "prefix", defaultPrefix, "email prefix to keep seeded users unique")
-	flag.StringVar(&cfg.password, "password", "SeedUser123!", "shared password for all seeded users")
+	flag.StringVar(&cfg.category, "category", "new", "category to seed: new, fashion, sports, home, electronics, all")
+
 	flag.Parse()
 
 	if cfg.batch <= 0 {
@@ -142,58 +288,60 @@ func parseFlags() seedConfig {
 	return cfg
 }
 
-func seedUsers(cfg seedConfig, rng *rand.Rand, hashedPassword string) error {
-	fmt.Printf("Seeding %d users in batches of %d...\n", cfg.users, cfg.batch)
+func seedProducts(cfg seedConfig, rng *rand.Rand) error {
+	groups, err := getSeedGroups(cfg.category)
+	if err != nil {
+		return err
+	}
 
-	for start := 0; start < cfg.users; start += cfg.batch {
-		end := min(start+cfg.batch, cfg.users)
-		users := make([]user.User, 0, end-start)
-
-		for i := start; i < end; i++ {
-			firstName := firstNames[rng.Intn(len(firstNames))]
-			lastName := lastNames[rng.Intn(len(lastNames))]
-			users = append(users, user.User{
-				Name:     firstName + " " + lastName,
-				Email:    fmt.Sprintf("%s_user_%06d@example.com", cfg.prefix, i+1),
-				Password: hashedPassword,
-				IsAdmin:  false,
-			})
-		}
-
-		if err := config.DB.CreateInBatches(users, cfg.batch).Error; err != nil {
+	for _, group := range groups {
+		if err := seedGroupProducts(group, cfg, rng); err != nil {
 			return err
 		}
-
-		fmt.Printf("  Users seeded: %d/%d\n", end, cfg.users)
 	}
 
 	return nil
 }
 
-func seedProducts(cfg seedConfig, rng *rand.Rand) error {
-	fmt.Printf("Seeding %d products in batches of %d...\n", cfg.products, cfg.batch)
-
-	categories := orderedCategories()
+func seedGroupProducts(group seedGroup, cfg seedConfig, rng *rand.Rand) error {
+	fmt.Printf(
+		"\nSeeding %d %s products in batches of %d...\n",
+		cfg.products,
+		group.name,
+		cfg.batch,
+	)
 
 	for start := 0; start < cfg.products; start += cfg.batch {
 		end := min(start+cfg.batch, cfg.products)
+
 		products := make([]product.Product, 0, end-start)
 
 		for i := start; i < end; i++ {
-			category := categories[i%len(categories)]
-			nouns := productNouns[category]
-			descriptions := categoryDescriptions[category]
+			category := group.categories[i%len(group.categories)]
+
+			nouns := productNouns[category.name]
+			descriptions := categoryDescriptions[category.name]
+
 			adjective := adjectives[rng.Intn(len(adjectives))]
 			noun := nouns[rng.Intn(len(nouns))]
 			model := 100 + rng.Intn(900)
 
+			categoryID := category.id
+
 			products = append(products, product.Product{
-				Name:        fmt.Sprintf("%s %s %d", adjective, noun, model),
+				Name: fmt.Sprintf(
+					"%s %s %d",
+					adjective,
+					noun,
+					model,
+				),
 				Description: descriptions[rng.Intn(len(descriptions))],
 				Price:       500 + float64(rng.Intn(14500)),
 				Stock:       5 + rng.Intn(95),
-				ImageURL:    imagePool[rng.Intn(len(imagePool))],
-				Category:    category,
+				ImageURL:    group.images[rng.Intn(len(group.images))],
+
+				Category:   category.name,
+				CategoryID: &categoryID,
 			})
 		}
 
@@ -201,40 +349,14 @@ func seedProducts(cfg seedConfig, rng *rand.Rand) error {
 			return err
 		}
 
-		fmt.Printf("  Products seeded: %d/%d\n", end, cfg.products)
+		fmt.Printf("Products seeded: %d/%d\n", end, cfg.products)
 	}
 
 	return nil
 }
 
-func orderedCategories() []string {
-	categories := make([]string, 0, len(productNouns))
-	for category := range productNouns {
-		categories = append(categories, category)
-	}
-
-	// Keep the output stable across runs.
-	for i := 0; i < len(categories); i++ {
-		for j := i + 1; j < len(categories); j++ {
-			if strings.Compare(categories[i], categories[j]) > 0 {
-				categories[i], categories[j] = categories[j], categories[i]
-			}
-		}
-	}
-
-	return categories
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func init() {
-	// Sanity check the image paths we reuse during seeding.
-	for i, path := range imagePool {
-		imagePool[i] = filepath.ToSlash(path)
+	for i, path := range electronicsImages {
+		electronicsImages[i] = filepath.ToSlash(path)
 	}
 }

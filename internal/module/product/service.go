@@ -57,7 +57,9 @@ func (s *productService) GetProducts(parent context.Context, params GetProductsP
 		}
 	}
 	if config.Typesense != nil {
-		products, found, categoryCounts, hasNext, err := s.SearchProductsWithTypesense(queryCtx, params, categoryIDs)
+		typesenseParams := params
+		typesenseParams.Search = searchQuery
+		products, found, categoryCounts, hasNext, err := s.SearchProductsWithTypesense(queryCtx, typesenseParams, categoryIDs)
 
 		if err == nil {
 			totalCount, countErr := s.GetProductCount(queryCtx)
