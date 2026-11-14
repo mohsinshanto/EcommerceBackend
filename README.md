@@ -224,6 +224,282 @@ Delete a product by its ID.
 ```http
 DELETE /api/products/510033
 ```
+## Categories API
+
+The Categories API manages product categories using a hierarchical (parent-child) structure. It supports creating, retrieving, updating, and deleting categories.
+
+### Base URL
+
+```text
+/api/categories
+```
+
+### Authentication
+
+- `GET /api/categories` is publicly accessible.
+- `POST`, `PUT`, and `DELETE` require JWT authentication and Admin privileges.
+
+### API Endpoints
+
+| Method | Endpoint | Access | Description |
+|---|---|---|---|
+| GET | `/api/categories` | Public | Retrieve all categories as a nested tree |
+| POST | `/api/categories` | Admin | Create a new category |
+| PUT | `/api/categories/:id` | Admin | Update an existing category |
+| DELETE | `/api/categories/:id` | Admin | Delete a category |
+
+---
+
+### 1. Get Category Tree
+
+**Endpoint:** `GET /api/categories`
+
+**Access:** Public
+
+Retrieves all categories and organizes them into a hierarchical tree using parent-child relationships.
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Categories loaded successfully",
+  "data": [
+    {
+      "id": 1,
+      "name": "Electronics",
+      "parent_id": null,
+      "children": [
+        {
+          "id": 2,
+          "name": "Laptop",
+          "parent_id": 1,
+          "children": [
+            {
+              "id": 3,
+              "name": "Dell",
+              "parent_id": 2,
+              "children": []
+            },
+            {
+              "id": 4,
+              "name": "HP",
+              "parent_id": 2,
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "name": "Mobile",
+          "parent_id": 1,
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Error Response (500 Internal Server Error):**
+
+```json
+{
+  "success": false,
+  "error": "Failed to load categories"
+}
+```
+
+---
+
+### 2. Create Category
+
+**Endpoint:** `POST /api/categories`
+
+**Access:** Admin
+
+Creates a new category. A category can be created as a root category or as a child of an existing category.
+
+**Request Headers:**
+
+```text
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "Gaming Laptop",
+  "parent_id": 2
+}
+```
+
+To create a root category, set `parent_id` to `null` or omit it.
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Category name |
+| `parent_id` | uint or null | No | ID of the parent category |
+
+**Success Response (201 Created):**
+
+```json
+{
+  "success": true,
+  "message": "Category created successfully",
+  "data": {
+    "id": 9,
+    "name": "Gaming Laptop",
+    "parent_id": 2,
+    "parent": null,
+    "children": null
+  }
+}
+```
+
+**Error Response (400 Bad Request):**
+
+Returned when the request body is invalid or the required `name` field is missing.
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+**Error Response (500 Internal Server Error):**
+
+Returned when category creation fails, including when the specified parent category does not exist.
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+---
+
+### 3. Update Category
+
+**Endpoint:** `PUT /api/categories/:id`
+
+**Access:** Admin
+
+Updates the name and parent category of an existing category.
+
+**Request Headers:**
+
+```text
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "Gaming Laptops",
+  "parent_id": 2
+}
+```
+
+To make the category a root category, set `parent_id` to `null`.
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Updated category name |
+| `parent_id` | uint or null | No | ID of the new parent category |
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Category updated successfully"
+}
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 400 Bad Request | Invalid category ID, invalid request body, or circular category reference |
+| 404 Not Found | Category does not exist |
+| 500 Internal Server Error | Existing circular reference, database error, or another internal error |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+---
+
+### 4. Delete Category
+
+**Endpoint:** `DELETE /api/categories/:id`
+
+**Access:** Admin
+
+Deletes an existing category.
+
+A category cannot be deleted if it has child categories. Child categories must be deleted first.
+
+**Request Headers:**
+
+```text
+Authorization: Bearer <JWT_TOKEN>
+```
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Category deleted successfully"
+}
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 400 Bad Request | Invalid category ID |
+| 404 Not Found | Category does not exist |
+| 409 Conflict | Category has child categories |
+| 500 Internal Server Error | Database error or another internal error |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+---
+
+### Category Validation Rules
+
+- Category name is required when creating or updating a category.
+- Category name has a maximum database column size of 100 characters.
+- A parent category must exist before it can be assigned.
+- A category cannot be assigned as its own parent.
+- Circular parent-child relationships are not allowed.
+- A category with child categories cannot be deleted.
+- Admin privileges are required for category creation, updating, and deletion.
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
