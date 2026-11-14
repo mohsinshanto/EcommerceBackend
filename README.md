@@ -808,6 +808,232 @@ Example error response:
 - A user cannot update or remove another user's cart items.
 - Cart total is calculated from product prices and quantities.
 - Cart item quantity must be at least 1.
+## Order API
+
+The Order API manages customer orders, order history, order archiving, and payment processing through Cash on Delivery (COD) and SSLCommerz.
+
+### Authentication
+
+The following endpoints require a valid JWT token:
+
+- `POST /api/order`
+- `GET /api/orders`
+- `PATCH /api/orders/:id/archive`
+
+Admin access is required for:
+
+- `GET /api/admin/orders`
+
+SSLCommerz callback endpoints are public.
+
+### 1. Create Order
+
+Creates an order using either Cash on Delivery or SSLCommerz.
+
+**Endpoint:** `POST /api/order`
+
+**Authentication:** Required
+
+**Request Body:**
+
+```json
+{
+  "customer_name": "John Doe",
+  "phone": "01712345678",
+  "address_line": "House 10, Road 5",
+  "city": "Dhaka",
+  "area": "Dhanmondi",
+  "postal_code": "1205",
+  "notes": "Please deliver carefully",
+  "payment_method": "cod"
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| customer_name | string | Yes | Customer name |
+| phone | string | Yes | Minimum 8 characters |
+| address_line | string | Yes | Delivery address |
+| city | string | Yes | City |
+| area | string | Yes | Area |
+| postal_code | string | No | Postal code |
+| notes | string | No | Additional notes |
+| payment_method | string | Yes | `cod` or `sslcommerz` |
+
+**COD Success Response (201):**
+
+```json
+{
+  "success": true,
+  "message": "Order placed successfully",
+  "data": {
+    "order_id": 101,
+    "total_price": 2500,
+    "payment_method": "cod",
+    "status": "Pending"
+  }
+}
+```
+
+**SSLCommerz Request:**
+
+Use the same request body with:
+
+```json
+{
+  "payment_method": "sslcommerz"
+}
+```
+
+**SSLCommerz Success Response (201):**
+
+```json
+{
+  "success": true,
+  "message": "Order created, proceed to payment",
+  "data": {
+    "order_id": 102,
+    "total_price": 2500,
+    "payment_method": "sslcommerz",
+    "transaction_id": "TRX-generated-uuid",
+    "payment_url": "https://gateway.example.com/payment"
+  }
+}
+```
+
+The `payment_url` redirects the customer to the SSLCommerz payment gateway.
+
+**Possible Error Responses:**
+
+| Status | Description |
+|---|---|
+| 400 | Invalid request, empty cart, or insufficient stock (COD) |
+| 400 | Unsupported payment method |
+| 409 | Insufficient stock (SSLCommerz) |
+| 503 | SSLCommerz is not configured |
+| 502 | Payment session result is unknown |
+| 500 | Internal order or transaction failure |
+
+### 2. Get My Orders
+
+Retrieves the authenticated user's order history.
+
+**Endpoint:** `GET /api/orders`
+
+**Authentication:** Required
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "message": "Orders loaded",
+  "data": {
+    "orders": [
+      {
+        "id": 101,
+        "total_price": 2500,
+        "payment_method": "cod",
+        "status": "Pending",
+        "created_at": "2026-11-14T10:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 3. Archive Order
+
+Archives an order belonging to the authenticated user.
+
+**Endpoint:** `PATCH /api/orders/:id/archive`
+
+**Authentication:** Required
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "message": "Order archived"
+}
+```
+
+**Possible Errors:**
+
+| Status | Description |
+|---|---|
+| 400 | Invalid order ID or order not found |
+| 403 | Cannot archive another user's order |
+| 400 | Other archive failure |
+
+### 4. Get All Orders (Admin)
+
+Retrieves all orders. Requires administrator privileges.
+
+**Endpoint:** `GET /api/admin/orders`
+
+**Authentication:** Admin only
+
+**Success Response (200):**
+
+```json
+{
+  "success": true,
+  "message": "All orders",
+  "data": {
+    "orders": [
+      {
+        "id": 101,
+        "user_id": 5,
+        "customer_name": "John Doe",
+        "total_price": 2500,
+        "payment_method": "cod",
+        "status": "Pending",
+        "created_at": "2026-11-14T10:30:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 5. SSLCommerz Payment Callbacks
+
+These endpoints receive payment gateway callbacks.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST / GET | `/api/payments/sslcommerz/success` | Verifies successful payment |
+| POST / GET | `/api/payments/sslcommerz/fail` | Redirects after failed payment |
+| POST / GET | `/api/payments/sslcommerz/cancel` | Redirects after cancelled payment |
+| POST | `/api/payments/sslcommerz/ipn` | Processes Instant Payment Notification |
+
+**Payment Verification:**
+
+The success callback receives `tran_id` and `val_id`, then verifies the transaction with SSLCommerz.
+
+The backend checks:
+
+- Payment validation status
+- Transaction ID
+- Validation ID
+- Payment method
+- Payment amount
+- Currency
+
+After successful verification, the order's payment status is updated to `Paid`.
+
+The success callback redirects the customer to:
+
+`/payment/result?status=success&transaction_id=...&order_id=...&message=...`
+
+The fail and cancel callbacks redirect to the frontend payment result page with their respective statuses.
+
+The IPN endpoint returns HTTP 200 when payment verification succeeds.
+
+**Note:** Payment callbacks are gateway-facing endpoints and are not intended to be called directly by customers.
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
