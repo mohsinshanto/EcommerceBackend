@@ -1034,6 +1034,222 @@ The fail and cancel callbacks redirect to the frontend payment result page with 
 The IPN endpoint returns HTTP 200 when payment verification succeeds.
 
 **Note:** Payment callbacks are gateway-facing endpoints and are not intended to be called directly by customers.
+## User API
+
+The User API provides user registration and login functionality. The application uses JWT-based authentication to protect private endpoints and role-based authorization to restrict administrative access.
+
+### Base URL
+
+```text
+/api
+```
+
+### Endpoints Overview
+
+| Method | Endpoint | Description | Authentication |
+|---|---|---|---|
+| POST | `/api/register` | Register a new user | Not required |
+| POST | `/api/login` | Authenticate a user and receive a JWT | Not required |
+
+---
+
+### 1. Register User
+
+Creates a new user account.
+
+**Endpoint**
+
+```http
+POST /api/register
+```
+
+**Request Body**
+
+| Field | Type | Required | Validation |
+|---|---|---|---|
+| name | string | Yes | Required |
+| email | string | Yes | Must be a valid email |
+| password | string | Yes | Minimum 6 characters |
+
+**Example Request**
+
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "password123"
+}
+```
+
+**Success Response — 200 OK**
+
+```json
+{
+  "success": true,
+  "message": "User registered successfully",
+  "data": {
+    "message": "User registered successfully",
+    "user": {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }
+}
+```
+
+**Error Responses**
+
+| Status Code | Description |
+|---|---|
+| 400 Bad Request | Invalid request body or validation failure |
+| 409 Conflict | Email already registered |
+| 500 Internal Server Error | Internal server error |
+
+**Implementation Details**
+
+- Email is trimmed and converted to lowercase before registration.
+- Password is hashed using bcrypt before being stored in the database.
+- Newly registered users have `is_admin = false`.
+- Password is not included in the registration response.
+- Registration uses a 5-second context timeout.
+
+---
+
+### 2. Login User
+
+Authenticates an existing user and returns a JWT token.
+
+**Endpoint**
+
+```http
+POST /api/login
+```
+
+**Request Body**
+
+| Field | Type | Required | Validation |
+|---|---|---|---|
+| email | string | Yes | Must be a valid email |
+| password | string | Yes | Required |
+
+**Example Request**
+
+```json
+{
+  "email": "john@example.com",
+  "password": "password123"
+}
+```
+
+**Success Response — 200 OK**
+
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "token": "your-jwt-token"
+  }
+}
+```
+
+**Error Responses**
+
+| Status Code | Description |
+|---|---|
+| 400 Bad Request | Invalid request body or validation failure |
+| 401 Unauthorized | Invalid email or password |
+| 500 Internal Server Error | Internal server error |
+
+**Implementation Details**
+
+- Email is trimmed and converted to lowercase.
+- Password is verified using bcrypt.
+- A JWT token is generated after successful authentication.
+- Login uses a 5-second context timeout.
+
+---
+
+### Authentication & Authorization
+
+The application uses JWT-based authentication and role-based authorization.
+
+#### JWT Authentication Middleware
+
+Protected endpoints require a JWT token in the Authorization header.
+
+**Request Header**
+
+```http
+Authorization: Bearer <your-jwt-token>
+```
+
+The `AuthMiddleware` performs the following operations:
+
+1. Checks whether the Authorization header exists.
+2. Extracts the JWT token from the Bearer authorization scheme.
+3. Validates the token signature using the configured JWT secret and HMAC signing method.
+4. Checks whether the token is valid and has not expired.
+5. Extracts the `user_id` claim and stores it in the Gin context.
+6. Allows the request to proceed to the next handler.
+
+**Error Responses**
+
+| Status Code | Message | Description |
+|---|---|---|
+| 401 Unauthorized | Authorization header required | Authorization header is missing |
+| 401 Unauthorized | Invalid authorization header | Authorization header does not follow the expected Bearer format |
+| 401 Unauthorized | Invalid or expired token | JWT validation fails or the token has expired |
+| 401 Unauthorized | Invalid token claims | JWT claims are not in the expected format |
+| 401 Unauthorized | Invalid user ID in token | User ID is missing, invalid, or not a positive integer |
+
+#### JWT Configuration
+
+| Property | Value |
+|---|---|
+| Signing Algorithm | HS256 |
+| Token Expiration | 72 hours |
+| User Identifier Claim | `user_id` |
+| Expiration Claim | `exp` |
+
+#### Admin Authorization Middleware
+
+The `AdminOnly` middleware restricts access to administrative endpoints.
+
+It retrieves the authenticated user's ID from the Gin context and checks the user's `IsAdmin` value in the database.
+
+**Error Responses**
+
+| Status Code | Message | Description |
+|---|---|---|
+| 401 Unauthorized | User not found | Authenticated user does not exist in the database |
+| 403 Forbidden | Admin access only | User does not have administrative privileges |
+
+#### Middleware Usage
+
+**Authenticated User Routes**
+
+```go
+auth := api.Group("/")
+auth.Use(middleware.AuthMiddleware())
+```
+
+**Admin-Only Routes**
+
+```go
+admin := api.Group("/")
+admin.Use(
+    middleware.AuthMiddleware(),
+    middleware.AdminOnly(),
+)
+```
+
+- `AuthMiddleware` verifies JWT authentication.
+- `AdminOnly` checks administrative privileges against the database.
+- Admin routes require both middlewares.
+
+
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
