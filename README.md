@@ -190,6 +190,42 @@ It also configures:
 
 
 ## Features
+### Authentication & Authorization
+- User registration and login
+- JWT-based authentication
+- Password hashing
+- Role-based authorization for admin operations
+
+### Product Management
+- Product listing with pagination
+- Product details
+- Product search using Typesense
+- Filtering by category and price
+- Sorting products
+- Category-based product counts using faceting
+
+### Nested Category Management
+- Hierarchical category structure
+- Parent and child category relationships
+- Recursive descendant category retrieval
+- Filtering products by parent or nested categories
+
+### Cart Management
+- Add products to cart
+- Update cart items
+- Remove cart items
+
+### Order & Payment Management
+- Order creation and order item management
+- Cash on Delivery (COD)
+- SSLCommerz payment integration
+- Payment success, failure, cancellation, and IPN handling
+
+### Performance & Scalability
+- Redis-based product count caching
+- Typesense-powered product search and filtering
+- Batch synchronization of products to Typesense
+
 ## API Endpoints
 
 Base URL: `http://localhost:8080/api`
@@ -1426,41 +1462,6 @@ admin.Use(
 - Admin routes require both middlewares.
 
 
-### Authentication & Authorization
-- User registration and login
-- JWT-based authentication
-- Password hashing
-- Role-based authorization for admin operations
-
-### Product Management
-- Product listing with pagination
-- Product details
-- Product search using Typesense
-- Filtering by category and price
-- Sorting products
-- Category-based product counts using faceting
-
-### Nested Category Management
-- Hierarchical category structure
-- Parent and child category relationships
-- Recursive descendant category retrieval
-- Filtering products by parent or nested categories
-
-### Cart Management
-- Add products to cart
-- Update cart items
-- Remove cart items
-
-### Order & Payment Management
-- Order creation and order item management
-- Cash on Delivery (COD)
-- SSLCommerz payment integration
-- Payment success, failure, cancellation, and IPN handling
-
-### Performance & Scalability
-- Redis-based product count caching
-- Typesense-powered product search and filtering
-- Batch synchronization of products to Typesense
 
 ## Getting Started
 
