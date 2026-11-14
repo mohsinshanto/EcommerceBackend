@@ -14,7 +14,67 @@ A RESTful e-commerce backend built with **Go**, **Gin**, and **MySQL**. The proj
 - **Payment Gateway:** SSLCommerz
 
 ## Features
+## API Endpoints
 
+Base URL: `http://localhost:8080/api`
+
+### Authentication
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| POST | `/register` | Register a new user | Public |
+| POST | `/login` | Authenticate user and obtain JWT | Public |
+
+### Products
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| GET | `/products` | Get products with pagination, search, and filters | Public |
+| GET | `/products/count` | Get total product count | Public |
+| GET | `/products/:id` | Get product details | Public |
+| POST | `/products` | Create a product | Admin |
+| DELETE | `/products/:id` | Delete a product | Admin |
+
+### Categories
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| GET | `/categories` | Get hierarchical category tree | Public |
+| POST | `/categories` | Create a category | Admin |
+| PUT | `/categories/:id` | Update a category | Admin |
+| DELETE | `/categories/:id` | Delete a category | Admin |
+
+### Cart
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| POST | `/cart` | Add product to cart | Authenticated |
+| GET | `/cart` | Get user's cart | Authenticated |
+| PUT | `/cart/:id` | Update cart quantity | Authenticated |
+| DELETE | `/cart/:id` | Remove item from cart | Authenticated |
+
+### Orders
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| POST | `/order` | Create an order | Authenticated |
+| GET | `/orders` | Get user's orders | Authenticated |
+| PATCH | `/orders/:id/archive` | Archive an order | Authenticated |
+| GET | `/admin/orders` | Get all orders | Admin |
+
+### SSLCommerz Payment Callbacks
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| POST | `/payments/sslcommerz/success` | Handle successful payment callback | Gateway |
+| GET | `/payments/sslcommerz/success` | Handle successful payment callback | Gateway |
+| POST | `/payments/sslcommerz/fail` | Handle failed payment callback | Gateway |
+| GET | `/payments/sslcommerz/fail` | Handle failed payment callback | Gateway |
+| POST | `/payments/sslcommerz/cancel` | Handle cancelled payment callback | Gateway |
+| GET | `/payments/sslcommerz/cancel` | Handle cancelled payment callback | Gateway |
+| POST | `/payments/sslcommerz/ipn` | Handle Instant Payment Notification | Gateway |
+
+**Note:** Protected endpoints require a valid JWT. Admin endpoints require both authentication and admin authorization.
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
