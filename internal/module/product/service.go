@@ -33,7 +33,8 @@ func NewProductService(
 	}
 }
 
-func (s *productService) GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse, int64, *int64, map[string]int, bool, error) {
+func (s *productService) GetProducts(parent context.Context, params GetProductsParams) ([]ProductResponse,
+	int64, *int64, map[string]int, bool, error) {
 	queryCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
