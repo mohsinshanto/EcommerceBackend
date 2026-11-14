@@ -75,6 +75,155 @@ Base URL: `http://localhost:8080/api`
 | POST | `/payments/sslcommerz/ipn` | Handle Instant Payment Notification | Gateway |
 
 **Note:** Protected endpoints require a valid JWT. Admin endpoints require both authentication and admin authorization.
+## Products API
+
+### 1. Get All Products
+
+Retrieve a paginated list of products with optional search, category filtering, price filtering, and sorting.
+
+**Endpoint:** `GET /api/products`
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `page` | int | Page number (default: 1) |
+| `limit` | int | Number of products per page (default: 8) |
+| `search` | string | Search products by keyword |
+| `category` | uint | Filter by category ID (includes descendant categories) |
+| `min_price` | float | Minimum product price |
+| `max_price` | float | Maximum product price |
+| `sort` | string | Sort products by price |
+
+**Supported Sorting Values:**
+
+- `price_asc` — Sort by price, lowest first.
+- `price_desc` — Sort by price, highest first.
+
+**Example Requests:**
+
+```http
+GET /api/products
+GET /api/products?page=2&limit=8
+GET /api/products?search=laptop
+GET /api/products?category=2
+GET /api/products?min_price=1000&max_price=50000
+GET /api/products?sort=price_asc
+GET /api/products?search=laptop&category=2&sort=price_desc
+```
+
+**Success Response (200 OK):**
+
+```json
+{
+  "message": "Products loaded",
+  "data": {
+    "products": [
+      {
+        "id": 510033,
+        "name": "Smart Ultrabook 489",
+        "description": "Product description",
+        "price": 75000,
+        "stock": 20,
+        "image_url": "https://example.com/image.jpg",
+        "category": "Laptop",
+        "category_id": 2,
+        "category_info": {
+          "id": 2,
+          "name": "Laptop"
+        }
+      }
+    ],
+    "count": 510020,
+    "search_count": 120,
+    "category_counts": {
+      "2": 120,
+      "6": 80
+    },
+    "page": 1,
+    "limit": 8,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `products` | array | List of product objects |
+| `count` | int | Total active product count |
+| `search_count` | int or null | Number of matching search results |
+| `category_counts` | object | Product counts grouped by category ID |
+| `page` | int | Current page |
+| `limit` | int | Products per page |
+| `has_next` | boolean | Whether another page exists |
+| `has_prev` | boolean | Whether a previous page exists |
+
+### 2. Get Product by ID
+
+Retrieve a single product using its ID.
+
+**Endpoint:** `GET /api/products/:id`
+
+**Example Request:**
+
+```http
+GET /api/products/510033
+```
+
+**Success Response (200 OK):**
+
+Returns a single product object with the same fields described in the Product Object Fields section.
+
+**Error Responses:**
+
+- `400 Bad Request` — Invalid product ID.
+- `404 Not Found` — Product not found.
+
+### 3. Get Product Count
+
+Retrieve the total number of active products.
+
+**Endpoint:** `GET /api/products/count`
+
+### 4. Create Product (Admin Only)
+
+Create a new product.
+
+**Endpoint:** `POST /api/products`
+
+**Authentication:** Required (Admin)
+
+**Request Body:**
+
+```json
+{
+  "name": "Wireless Headphones",
+  "description": "Bluetooth wireless headphones",
+  "price": 2500,
+  "stock": 50,
+  "image_url": "https://example.com/headphones.jpg",
+  "category": "Audio"
+}
+```
+
+All request fields are required.
+
+### 5. Delete Product (Admin Only)
+
+Delete a product by its ID.
+
+**Endpoint:** `DELETE /api/products/:id`
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```http
+DELETE /api/products/510033
+```
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
