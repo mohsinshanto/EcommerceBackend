@@ -19,5 +19,5 @@ type CartItemResponse struct {
 }
 type CartResponse struct {
 	CartItems []CartItemResponse `json:"cartItems"`
-	Total     float64            `josn:"total"`
+	Total     float64            `json:"total"`
 }

@@ -500,6 +500,314 @@ Example error response:
 - Circular parent-child relationships are not allowed.
 - A category with child categories cannot be deleted.
 - Admin privileges are required for category creation, updating, and deletion.
+## Cart API
+
+The Cart API allows authenticated users to add products to their shopping cart, retrieve cart items, update item quantities, and remove items.
+
+### Base URL
+
+```text
+/api/cart
+```
+
+### Authentication
+
+All Cart API endpoints require JWT authentication.
+
+**Request Header:**
+
+```text
+Authorization: Bearer <JWT_TOKEN>
+Content-Type: application/json
+```
+
+The cart is associated with the authenticated user. Users can only update or remove their own cart items.
+
+### API Endpoints
+
+| Method | Endpoint | Access | Description |
+|---|---|---|---|
+| POST | `/api/cart` | Authenticated | Add a product to the cart |
+| GET | `/api/cart` | Authenticated | Retrieve the user's cart |
+| PUT | `/api/cart/:id` | Authenticated | Update cart item quantity |
+| DELETE | `/api/cart/:id` | Authenticated | Remove an item from the cart |
+
+---
+
+### 1. Add to Cart
+
+**Endpoint:** `POST /api/cart`
+
+**Access:** Authenticated
+
+Adds a product to the authenticated user's cart.
+
+If the product already exists in the cart, its quantity is increased instead of creating a duplicate cart item.
+
+**Request Body:**
+
+```json
+{
+  "product_id": 10,
+  "quantity": 2
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `product_id` | uint | Yes | ID of the product |
+| `quantity` | integer | Yes | Quantity to add; minimum value is 1 |
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Item added to cart",
+  "data": {
+    "id": 5,
+    "quantity": 2,
+    "product": {
+      "id": 10,
+      "name": "Smartphone",
+      "price": 25000,
+      "image_url": "https://example.com/image.jpg"
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 400 Bad Request | Invalid request body, product not found, insufficient stock, or cart operation failed |
+| 401 Unauthorized | User is not authenticated |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+**Business Logic:**
+
+- Checks whether the requested product exists.
+- Checks whether sufficient stock is available.
+- If the product already exists in the cart, increases its quantity.
+- Otherwise, creates a new cart item.
+- Checks stock against the resulting total quantity when updating an existing item.
+
+---
+
+### 2. Get User Cart
+
+**Endpoint:** `GET /api/cart`
+
+**Access:** Authenticated
+
+Retrieves all cart items belonging to the authenticated user.
+
+The API also calculates the total cart price using:
+
+```text
+Total = Sum(Quantity × Product Price)
+```
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Cart loaded",
+  "data": {
+    "cartItems": [
+      {
+        "id": 5,
+        "quantity": 2,
+        "product": {
+          "id": 10,
+          "name": "Smartphone",
+          "price": 25000,
+          "image_url": "https://example.com/image.jpg"
+        }
+      },
+      {
+        "id": 6,
+        "quantity": 1,
+        "product": {
+          "id": 20,
+          "name": "Wireless Headphone",
+          "price": 3000,
+          "image_url": "https://example.com/headphone.jpg"
+        }
+      }
+    ],
+    "Total": 53000
+  }
+}
+```
+
+**Note:** The current `CartResponse` struct has an incorrect JSON tag (`josn:"total"`). Therefore, Go's JSON encoder uses the exported field name `Total`.
+
+After correcting the tag to `json:"total"`, the response key will be:
+
+```json
+"total": 53000
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 401 Unauthorized | User is not authenticated |
+| 500 Internal Server Error | Failed to retrieve the cart |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+---
+
+### 3. Update Cart Item Quantity
+
+**Endpoint:** `PUT /api/cart/:id`
+
+**Access:** Authenticated
+
+Updates the quantity of an existing cart item.
+
+The `id` in the URL represents the cart item ID, not the product ID.
+
+**Request Example:**
+
+```text
+PUT /api/cart/5
+```
+
+**Request Body:**
+
+```json
+{
+  "quantity": 3
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `quantity` | integer | Yes | New quantity; minimum value is 1 |
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Cart updated"
+}
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 400 Bad Request | Invalid cart item ID, invalid quantity, or cart item not found |
+| 401 Unauthorized | User is not authenticated |
+| 403 Forbidden | Cart item belongs to another user |
+| 404 Not Found | Associated product does not exist |
+| 409 Conflict | Insufficient product stock |
+| 500 Internal Server Error | Failed to update the cart item or another internal error |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+**Business Logic:**
+
+- Finds the cart item using its ID.
+- Verifies that the cart item belongs to the authenticated user.
+- Validates the requested quantity.
+- Checks whether sufficient product stock is available.
+- Updates the cart item quantity.
+
+---
+
+### 4. Remove Cart Item
+
+**Endpoint:** `DELETE /api/cart/:id`
+
+**Access:** Authenticated
+
+Removes an item from the authenticated user's cart.
+
+The `id` in the URL represents the cart item ID.
+
+**Request Example:**
+
+```text
+DELETE /api/cart/5
+```
+
+**Success Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Item removed from cart"
+}
+```
+
+**Error Responses:**
+
+| Status Code | Condition |
+|---|---|
+| 400 Bad Request | Invalid cart item ID or cart item not found |
+| 401 Unauthorized | User is not authenticated |
+| 403 Forbidden | Cart item belongs to another user |
+| 500 Internal Server Error | Failed to remove the cart item or another internal error |
+
+Example error response:
+
+```json
+{
+  "success": false,
+  "error": "error details"
+}
+```
+
+**Business Logic:**
+
+- Finds the cart item using its ID.
+- Verifies that the cart item belongs to the authenticated user.
+- Deletes the cart item from the database.
+
+---
+
+### Cart Business Rules
+
+- Every cart operation requires authentication.
+- Each cart item belongs to a specific user.
+- Adding an existing product increases its quantity.
+- Product stock is checked before adding or updating quantities.
+- A user cannot update or remove another user's cart items.
+- Cart total is calculated from product prices and quantities.
+- Cart item quantity must be at least 1.
 ### Authentication & Authorization
 - User registration and login
 - JWT-based authentication
