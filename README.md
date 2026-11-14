@@ -12,6 +12,182 @@ A RESTful e-commerce backend built with **Go**, **Gin**, and **MySQL**. The proj
 - **Search Engine:** Typesense
 - **Authentication:** JWT
 - **Payment Gateway:** SSLCommerz
+## Project Architecture
+
+The Ecommerce Backend is built using Go and the Gin web framework. It follows a modular layered architecture that separates HTTP handling, business logic, database operations, and application configuration.
+
+### Project Structure
+
+```text
+ecommerce-backend/
+├── config/
+│   ├── database.go
+│   ├── env.go
+│   ├── jwt.go
+│   ├── redis.go
+│   ├── sslcommerz.go
+│   └── typesense.go
+│
+├── errors/
+│   ├── cart-errors.go
+│   ├── category-errors.go
+│   ├── order-errors.go
+│   ├── product-errors.go
+│   └── user-errors.go
+│
+├── internal/
+│   ├── cmd/
+│   │   ├── seed/
+│   │   │   └── main.go
+│   │   └── typesense-sync/
+│   │       └── main.go
+│   │
+│   └── module/
+│       ├── cart/
+│       ├── category/
+│       ├── middleware/
+│       ├── order/
+│       ├── product/
+│       └── user/
+│
+├── public/
+├── utils/
+│   └── response.go
+│
+├── main.go
+├── go.mod
+├── go.sum
+└── .env.example
+```
+
+### Modular Architecture
+
+The application is divided into independent feature modules. Each module manages a specific part of the ecommerce system.
+
+| Module | Responsibility |
+|---|---|
+| User | User registration and login |
+| Product | Product management, search, filtering and pagination |
+| Category | Category management and nested category hierarchy |
+| Cart | Shopping cart management |
+| Order | Order processing and payment integration |
+| Middleware | JWT authentication and admin authorization |
+
+### Layered Architecture
+
+Most feature modules follow a layered structure.
+
+| Layer | File | Responsibility |
+|---|---|---|
+| Controller | `controller.go` | Handles HTTP requests and sends responses |
+| Service | `service.go` | Implements business logic |
+| Repository | `repository.go` | Handles database operations |
+| Model | `model.go` | Defines GORM database models |
+| DTO | `*.dto.go` | Defines request and response structures |
+| Routes | `routes.go` | Registers API endpoints |
+
+**Request Flow**
+
+```text
+Client Request
+      |
+      v
+    Routes
+      |
+      v
+  Middleware
+      |
+      v
+  Controller
+      |
+      v
+   Service
+      |
+      v
+  Repository
+      |
+      v
+   Database
+```
+
+The controller receives HTTP requests, the service executes business logic, and the repository handles database operations. The response then returns to the client through the controller.
+
+### Shared Components
+
+**Config (`config/`)**
+
+Manages application configuration and external service initialization:
+
+- MySQL database connection
+- Environment variable loading
+- JWT secret configuration
+- Redis initialization
+- SSLCommerz configuration
+- Typesense client initialization
+
+**Errors (`errors/`)**
+
+Contains application-specific errors for different modules, allowing services and controllers to handle known error conditions.
+
+**Utils (`utils/`)**
+
+Contains reusable utilities, including standardized API success and error response helpers.
+
+**Commands (`internal/cmd/`)**
+
+Contains standalone application commands:
+
+- `seed/`: Database seeding command.
+- `typesense-sync/`: Typesense product synchronization command.
+
+### Application Initialization
+
+The application initializes its dependencies and registers its modules in `main.go`.
+
+The startup process includes:
+
+1. Loads environment variables.
+2. Loads the JWT secret.
+3. Initializes SSLCommerz.
+4. Initializes Redis.
+5. Connects to MySQL.
+6. Initializes Typesense.
+7. Runs GORM AutoMigrate for User, Category, Product, Cart, Order and OrderItem models.
+8. Ensures the Typesense products collection exists.
+9. Initializes application modules and their dependencies.
+10. Configures Gin, CORS and fallback handlers.
+11. Registers module routes.
+12. Starts the HTTP server on port `8080`.
+
+### Module Dependencies
+
+The Product Module depends on the Category Service for category-related functionality.
+
+The dependency is injected during module initialization:
+
+```go
+categoryRepo := category.NewCategoryRepository(config.DB)
+categoryService := category.NewCategoryService(categoryRepo)
+
+productModule := product.NewModule(config.DB, categoryService)
+```
+
+This allows the Product Module to use category-related business logic without directly implementing it.
+
+### HTTP Server
+
+The application uses the Gin framework with `gin.Default()` and runs on:
+
+```text
+http://localhost:8080
+```
+
+It also configures:
+
+- CORS for frontend communication.
+- A custom 404 response for unmatched routes.
+- A custom 405 response for unsupported HTTP methods.
+
 
 ## Features
 ## API Endpoints
